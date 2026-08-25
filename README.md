@@ -58,6 +58,16 @@ python scripts\bootstrap_local_users.py
 
 Use `supervisor / Supervisor123!` to upload a chart, then `coder / Coder123!` to claim it. Accounts are stored in `instance/users.json`.
 
+### Three-Bucket Chart Workflow
+
+The authenticated workflow uses three chart buckets:
+
+1. **Bucket 1 - L1 coding**: Managers and supervisors upload one or many PDF charts with `POST /api/charts/upload-bulk`. L1 coders use `POST /api/charts/claim` to get the next chart.
+2. **Bucket 2 - L2 audit**: An L1 submission moves the chart to `pending_audit`. L2 coders claim only these charts and submit their audit decision.
+3. **Bucket 3 - audited records**: An L2 submission marks the chart `audited`. Managers and supervisors can read the restricted projection at `GET /api/dashboard/audit-bucket`, containing chart ID, patient and encounter details, codes, category, L1/L2 usernames, and audit time.
+
+Roles are `manager`, `supervisor`, `coder_l1` (the legacy `coder` role remains an L1 alias), and `coder_l2`. Manager and supervisor dashboards expose bucket counts and production/quality totals; coder dashboards expose only the current user's assigned work and workflow stage.
+
 ---
 
 ## 📋 Core Features

@@ -15,6 +15,7 @@ from backend.app.services.workflow_services import (
     chart_assignment_service,
     risk_service,
 )
+from backend.app.services.chart_assignment_service import ChartAssignmentError
 from backend.app.api.auth.auth_routes import auth_service
 
 bp = Blueprint("dashboard", __name__, url_prefix="/api/dashboard")
@@ -23,13 +24,19 @@ chart_service = chart_assignment_service
 
 @bp.route("/coder", methods=["GET"])
 @require_auth
-@require_roles("coder")
+@require_roles("coder", "coder_l1", "coder_l2")
 def coder_dashboard() -> tuple:
     user = request.current_user
+    is_l2 = user.role == "coder_l2"
     return jsonify({
         "success": True,
         "user": {"user_id": user.user_id, "username": user.username, "role": user.role},
-        "message": "Coder workspace ready",
+        "workflow_stage": "l2" if is_l2 else "l1",
+        "claim_bucket": 2 if is_l2 else 1,
+        "assigned_chart_ids": [
+            chart.chart_id for chart in chart_service.repository.list_charts()
+            if chart.assigned_to_user_id == user.user_id
+        ],
     }), 200
 
 
@@ -46,12 +53,30 @@ def admin_dashboard() -> tuple:
 
 @bp.route("/supervisor", methods=["GET"])
 @require_auth
-@require_roles("supervisor", "admin", "master_admin")
+@require_roles("manager", "supervisor", "admin", "master_admin")
 def supervisor_dashboard() -> tuple:
     charts = chart_service.repository.list_charts()
+    submissions = risk_service.repository.get_all()
+    production_charts_by_user = {}
+    quality_rejections_by_user = {}
+    for submission in submissions:
+        production_charts_by_user.setdefault(submission.user_id, set()).add(submission.chart_id)
+        decisions = (submission.user_inputs or {}).get("diagnosis_decisions", {})
+        quality_rejections_by_user[submission.user_id] = quality_rejections_by_user.get(submission.user_id, 0) + sum(
+            1 for decision in decisions.values() if decision.get("decision") == "rejected"
+        )
     return jsonify({
         "success": True,
         "message": "Supervisor workspace ready",
+        "buckets": {
+            "bucket_1": sum(chart.status in {"queued", "released", "locked", "in_progress"} for chart in charts),
+            "bucket_2": sum(chart.status in {"pending_audit", "audit_locked"} for chart in charts),
+            "bucket_3": sum(chart.status == "audited" for chart in charts),
+        },
+        "production_by_user": {
+            user_id: len(chart_ids) for user_id, chart_ids in production_charts_by_user.items()
+        },
+        "quality_rejections_by_user": quality_rejections_by_user,
         "queue": [
             {
                 "chart_id": chart.chart_id,
@@ -65,9 +90,42 @@ def supervisor_dashboard() -> tuple:
     }), 200
 
 
+@bp.route("/manager", methods=["GET"])
+@require_auth
+@require_roles("manager", "admin", "master_admin")
+def manager_dashboard() -> tuple:
+    return supervisor_dashboard()
+
+
+@bp.route("/audit-bucket", methods=["GET"])
+@require_auth
+@require_roles("manager", "supervisor", "admin", "master_admin")
+def audit_bucket() -> tuple:
+    """Return the restricted bucket-3 audit projection, without source files or OCR text."""
+    users = auth_service.repository
+    records = []
+    for chart in chart_service.repository.list_charts():
+        if chart.status != "audited":
+            continue
+        latest = risk_service.get_latest_for_chart(chart.chart_id)
+        coder = users.get_user_by_id(chart.l1_user_id) if chart.l1_user_id else None
+        auditor = users.get_user_by_id(chart.l2_user_id) if chart.l2_user_id else None
+        records.append({
+            "chart_id": chart.chart_id,
+            "patient_details": chart.patient_details,
+            "encounter_details": chart.encounter_details,
+            "codes": latest.captured_icd10_codes if latest else [],
+            "category": chart.category,
+            "l1_username": coder.username if coder else None,
+            "l2_username": auditor.username if auditor else None,
+            "audited_at": chart.updated_at.isoformat() if chart.updated_at else None,
+        })
+    return jsonify({"success": True, "bucket": 3, "records": records, "count": len(records)}), 200
+
+
 @bp.route("/export.xlsx", methods=["GET"])
 @require_auth
-@require_roles("supervisor", "admin", "master_admin")
+@require_roles("manager", "supervisor", "admin", "master_admin")
 def export_coding_workbook():
     workbook = Workbook()
     charts_sheet = workbook.active
@@ -161,7 +219,7 @@ def export_coding_workbook():
 
 @bp.route("/submit", methods=["POST"])
 @require_auth
-@require_roles("coder")
+@require_roles("coder", "coder_l1", "coder_l2")
 def submit_coding() -> tuple:
     payload = request.get_json(silent=True) or {}
     chart_id = int(payload.get("chart_id", 0))
@@ -170,10 +228,18 @@ def submit_coding() -> tuple:
         return jsonify({"success": False, "error": "chart_not_found"}), 404
     if chart.assigned_to_user_id != request.current_user.user_id:
         return jsonify({"success": False, "error": "chart_not_assigned_to_coder"}), 403
-    if chart.status == "completed":
-        return jsonify({"success": False, "error": "chart_already_submitted"}), 409
+    try:
+        chart.patient_details = payload.get("patient_details", chart.patient_details)
+        chart.encounter_details = payload.get("encounter_details", chart.encounter_details)
+        chart.category = str(payload.get("category", chart.category)).strip()
+        chart = chart_service.submit_chart(
+            chart_id=chart_id,
+            user_id=request.current_user.user_id,
+            actor_role=request.current_user.role,
+        )
+    except ChartAssignmentError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
 
-    latest = risk_service.get_latest_for_chart(chart_id)
     record = risk_service.save_submission(
         chart_id=chart_id,
         user_id=request.current_user.user_id,
@@ -182,14 +248,15 @@ def submit_coding() -> tuple:
         mapped_hcc_versions=payload.get("mapped_hcc_versions", []),
         calculated_raf_score=payload.get("calculated_raf_score"),
     )
-    chart.status = "completed"
-    chart.locked_until = None
-    chart.locked_at = None
-    chart_service.repository.update_chart(chart)
     audit_service.record_event(
         action_type="coding_submitted",
         entity_type="risk_adjustment_input",
-        details={"chart_id": chart_id, "input_id": record.input_id, "status": "completed"},
+        details={
+            "chart_id": chart_id,
+            "input_id": record.input_id,
+            "status": chart.status,
+            "bucket": 2 if chart.status == "pending_audit" else 3,
+        },
         user_id=request.current_user.user_id,
         chart_id=chart_id,
         entity_id=str(record.input_id),

@@ -26,15 +26,19 @@ class ChartAssignmentService:
         self._lock = RLock()
 
     def claim_next_available_chart(self, user_id: int, actor_role: str = "coder") -> Optional[ChartRecord]:
-        if actor_role not in {"coder", "admin", "master_admin"}:
+        if actor_role not in {"coder", "coder_l1", "coder_l2", "admin", "master_admin"}:
             raise ChartAssignmentError("Unsupported role")
+
+        stage = "l2" if actor_role == "coder_l2" else "l1"
+        available_statuses = {"pending_audit"} if stage == "l2" else {"queued", "released"}
+        assigned_field = "l2_user_id" if stage == "l2" else "l1_user_id"
 
         with self._lock:
             now = datetime.now(timezone.utc)
             existing = [
                 chart for chart in self.repository.list_charts()
-                if chart.assigned_to_user_id == user_id
-                and chart.status in {"locked", "in_progress"}
+                if getattr(chart, assigned_field) == user_id
+                and chart.status in ({"audit_locked"} if stage == "l2" else {"locked", "in_progress"})
                 and (not chart.locked_until or chart.locked_until > now)
             ]
             if existing:
@@ -43,19 +47,47 @@ class ChartAssignmentService:
 
             candidates = [
                 chart for chart in self.repository.list_charts()
-                if chart.status in {"queued", "released"}
-                or (chart.status == "locked" and chart.locked_until and chart.locked_until <= now)
+                if chart.status in available_statuses
+                or (chart.status == ("audit_locked" if stage == "l2" else "locked")
+                    and chart.locked_until and chart.locked_until <= now)
             ]
             if not candidates:
                 return None
 
             candidates.sort(key=lambda item: (-item.priority, item.uploaded_at, item.chart_id))
             selected = candidates[0]
-            selected.status = "locked"
+            selected.status = "audit_locked" if stage == "l2" else "locked"
             selected.assigned_to_user_id = user_id
+            setattr(selected, assigned_field, user_id)
             selected.locked_at = now
             selected.locked_until = now + timedelta(minutes=self.lock_duration_minutes)
             return self.repository.update_chart(selected)
+
+    def submit_chart(self, chart_id: int, user_id: int, actor_role: str) -> ChartRecord:
+        """Move an assigned chart from L1 work to L2 audit, or from L2 to archive."""
+        if actor_role not in {"coder", "coder_l1", "coder_l2"}:
+            raise ChartAssignmentError("Only coders can submit charts")
+
+        with self._lock:
+            chart = self.repository.get_chart(chart_id)
+            if not chart:
+                raise ChartAssignmentError("Chart not found")
+            if chart.assigned_to_user_id != user_id:
+                raise ChartAssignmentError("Chart is not assigned to this coder")
+
+            if actor_role in {"coder", "coder_l1"}:
+                if chart.status not in {"locked", "in_progress"}:
+                    raise ChartAssignmentError("Chart is not in the L1 bucket")
+                chart.status = "pending_audit"
+            else:
+                if chart.status != "audit_locked":
+                    raise ChartAssignmentError("Chart is not in the L2 bucket")
+                chart.status = "audited"
+
+            chart.assigned_to_user_id = None
+            chart.locked_at = None
+            chart.locked_until = None
+            return self.repository.update_chart(chart)
 
     def release_chart(self, chart_id: int, actor_user_id: int, actor_role: str = "coder") -> bool:
         with self._lock:

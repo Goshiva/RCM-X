@@ -39,15 +39,20 @@ class Chart(Base):
     file_path = Column(Text, nullable=False, unique=True)
     original_filename = Column(String(255), nullable=False)
     status = Column(String(30), nullable=False, default="queued")
+    patient_details = Column(JSON, nullable=False, default=dict)
+    encounter_details = Column(JSON, nullable=False, default=dict)
+    category = Column(String(100), nullable=False, default="")
     priority = Column(Integer, nullable=False, default=0)
     assigned_to_user_id = Column(Integer, ForeignKey("users.user_id"), nullable=True)
     locked_at = Column(TIMESTAMP(timezone=True), nullable=True)
     locked_until = Column(TIMESTAMP(timezone=True), nullable=True)
+    l1_user_id = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    l2_user_id = Column(Integer, ForeignKey("users.user_id"), nullable=True)
     uploaded_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
-    assignee = relationship("User", lazy="joined")
+    assignee = relationship("User", foreign_keys=[assigned_to_user_id], lazy="joined")
 
 
 class RiskAdjustmentInput(Base):

@@ -28,7 +28,7 @@ icd_mapper = ICD10Mapper()
 
 @bp.route("/upload", methods=["POST"])
 @require_auth
-@require_roles("supervisor", "admin", "master_admin")
+@require_roles("manager", "supervisor", "admin", "master_admin")
 def upload_chart():
     uploaded_file = request.files.get("file")
     if not uploaded_file or not uploaded_file.filename:
@@ -69,9 +69,47 @@ def upload_chart():
     }), 201
 
 
+@bp.route("/upload-bulk", methods=["POST"])
+@require_auth
+@require_roles("manager", "supervisor", "admin", "master_admin")
+def upload_charts_bulk():
+    uploaded_files = [item for item in request.files.getlist("files") if item and item.filename]
+    if not uploaded_files:
+        return jsonify({"success": False, "error": "no_files_provided"}), 400
+
+    upload_folder = os.getenv("UPLOAD_FOLDER", "uploads")
+    os.makedirs(upload_folder, exist_ok=True)
+    created = []
+    for uploaded_file in uploaded_files:
+        original_filename = secure_filename(uploaded_file.filename)
+        if not original_filename.lower().endswith(".pdf"):
+            continue
+        file_path = os.path.join(upload_folder, f"{uuid4().hex}.pdf")
+        uploaded_file.save(file_path)
+        chart = chart_assignment_service.repository.create_chart(
+            ChartRecord(file_path=file_path, original_filename=original_filename)
+        )
+        nlp_worker.enqueue(chart.chart_id)
+        if not os.getenv("REDIS_BROKER_URL"):
+            nlp_worker.process_next()
+        audit_service.record_event(
+            action_type="chart_uploaded",
+            entity_type="chart",
+            details={"chart_id": chart.chart_id, "original_filename": original_filename, "bucket": 1},
+            user_id=request.current_user.user_id,
+            chart_id=chart.chart_id,
+            entity_id=str(chart.chart_id),
+        )
+        created.append({"chart_id": chart.chart_id, "original_filename": original_filename, "status": chart.status})
+
+    if not created:
+        return jsonify({"success": False, "error": "only_pdf_files_supported"}), 400
+    return jsonify({"success": True, "charts": created, "count": len(created), "bucket": 1}), 201
+
+
 @bp.route("/claim", methods=["POST"])
 @require_auth
-@require_roles("coder", "admin", "master_admin")
+@require_roles("coder", "coder_l1", "coder_l2", "admin", "master_admin")
 def claim_chart():
     payload = request.get_json(silent=True) or {}
     try:
@@ -94,7 +132,7 @@ def claim_chart():
 
 @bp.route("/current", methods=["GET"])
 @require_auth
-@require_roles("coder")
+@require_roles("coder", "coder_l1", "coder_l2")
 def current_chart():
     chart = chart_assignment_service.claim_next_available_chart(
         user_id=request.current_user.user_id,
@@ -116,7 +154,7 @@ def current_chart():
 
 @bp.route("/<int:chart_id>/release", methods=["POST"])
 @require_auth
-@require_roles("coder", "admin", "master_admin")
+@require_roles("coder", "coder_l1", "coder_l2", "admin", "master_admin")
 def release_chart(chart_id: int):
     payload = request.get_json(silent=True) or {}
     try:
@@ -132,7 +170,7 @@ def release_chart(chart_id: int):
 
 @bp.route("/<int:chart_id>/file", methods=["GET"])
 @require_auth
-@require_roles("coder", "supervisor", "admin", "master_admin")
+@require_roles("coder", "coder_l1", "coder_l2", "manager", "supervisor", "admin", "master_admin")
 def chart_file(chart_id: int):
     chart = chart_assignment_service.repository.get_chart(chart_id)
     if not chart or not os.path.isfile(chart.file_path):
@@ -227,7 +265,7 @@ def enqueue_chart(chart_id: int):
 
 @bp.route("/<int:chart_id>", methods=["GET"])
 @require_auth
-@require_roles("coder", "supervisor", "admin", "master_admin")
+@require_roles("coder", "coder_l1", "coder_l2", "manager", "supervisor", "admin", "master_admin")
 def get_chart(chart_id: int):
     chart = chart_assignment_service.repository.get_chart(chart_id)
     if not chart:
@@ -256,7 +294,7 @@ def get_chart(chart_id: int):
 
 @bp.route("/<int:chart_id>/add-code", methods=["POST"])
 @require_auth
-@require_roles("coder")
+@require_roles("coder", "coder_l1", "coder_l2")
 def add_code(chart_id: int):
     payload = request.get_json(silent=True) or {}
     code = str(payload.get("code", "")).strip()
@@ -296,7 +334,7 @@ def add_code(chart_id: int):
 
 @bp.route("/<int:chart_id>/diagnosis-decision", methods=["POST"])
 @require_auth
-@require_roles("coder")
+@require_roles("coder", "coder_l1", "coder_l2")
 def diagnosis_decision(chart_id: int):
     payload = request.get_json(silent=True) or {}
     diagnosis = str(payload.get("diagnosis", "")).strip()
@@ -352,7 +390,7 @@ def diagnosis_decision(chart_id: int):
 
 @bp.route("/<int:chart_id>/icd-evidence", methods=["GET"])
 @require_auth
-@require_roles("coder", "supervisor", "admin", "master_admin")
+@require_roles("coder", "coder_l1", "coder_l2", "manager", "supervisor", "admin", "master_admin")
 def icd_evidence(chart_id: int):
     chart = chart_assignment_service.repository.get_chart(chart_id)
     if not chart or not os.path.isfile(chart.file_path):
@@ -381,7 +419,7 @@ def icd_evidence(chart_id: int):
 
 @bp.route("/validate-code", methods=["POST"])
 @require_auth
-@require_roles("coder", "admin", "master_admin")
+@require_roles("coder", "coder_l1", "coder_l2", "admin", "master_admin")
 def validate_code():
     payload = request.get_json(silent=True) or {}
     code = str(payload.get("code", "")).strip()

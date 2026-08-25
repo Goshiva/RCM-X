@@ -1,4 +1,4 @@
-"""Create local development accounts for the three-role workflow."""
+"""Create local development accounts for the manager, supervisor, and coder workflow."""
 
 import sys
 from pathlib import Path
@@ -10,8 +10,10 @@ from backend.app.services.auth_service import AuthError, default_auth_service
 
 USERS = (
     ("admin", "admin@example.com", "Admin123!", "admin"),
+    ("manager", "manager@example.com", "Manager123!", "manager"),
     ("supervisor", "supervisor@example.com", "Supervisor123!", "supervisor"),
-    ("coder", "coder@example.com", "Coder123!", "coder"),
+    ("coder", "coder@example.com", "Coder123!", "coder_l1"),
+    ("auditor", "auditor@example.com", "Auditor123!", "coder_l2"),
 )
 
 
