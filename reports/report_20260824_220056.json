@@ -1,0 +1,54 @@
+{
+  "demographics": {
+    "age": 70,
+    "gender": "F"
+  },
+  "insurance_model": "MA",
+  "patient_id": "PAT_1787589054",
+  "premium_calculation": {
+    "adjusted_premium": 87608.24,
+    "age_factor": 4.24,
+    "base_premium": 12000,
+    "gender_factor": 0.98,
+    "insurance_model": "MA",
+    "monthly_premium": 7300.69,
+    "raf_multiplier": 1.7570000000000001
+  },
+  "raf_calculation": {
+    "demographics": {
+      "age": 70,
+      "gender": "F"
+    },
+    "hcc_mappings": [
+      {
+        "hcc_id": "HCC035",
+        "hcc_name": "Diabetes without complications",
+        "icd10": "E11.9",
+        "raf_value": 0.124
+      },
+      {
+        "hcc_id": "HCC053",
+        "hcc_name": "Hypertension",
+        "icd10": "I10",
+        "raf_value": 0.011
+      },
+      {
+        "hcc_id": "HCC047",
+        "hcc_name": "Heart Failure",
+        "icd10": "I50",
+        "raf_value": 0.301
+      }
+    ],
+    "hierarchy_issues": [],
+    "icd10_codes": [
+      "E11.9",
+      "I10",
+      "I50"
+    ],
+    "raf_score": 0.757
+  },
+  "recommendations": [],
+  "report_date": "2026-08-24T22:00:54.082696",
+  "risk_level": "Moderate Risk",
+  "report_generated": "2026-08-24T22:00:46.975999"
+}

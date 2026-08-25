@@ -1,0 +1,28 @@
+[
+  {
+    "file_path": "uploads\\59ab8aeac6eb4d51ae1379465fd87990.pdf",
+    "original_filename": "integration.pdf",
+    "status": "locked",
+    "priority": 0,
+    "chart_id": 1,
+    "assigned_to_user_id": 3,
+    "locked_at": "2026-08-25T15:20:51.966954+00:00",
+    "locked_until": "2026-08-25T16:20:51.966954+00:00",
+    "uploaded_at": "2026-08-24T18:19:36.047871+00:00",
+    "created_at": "2026-08-24T18:19:36.047871+00:00",
+    "updated_at": "2026-08-25T15:20:51.966970+00:00"
+  },
+  {
+    "file_path": "uploads\\75cad9ecf79b4d01bd4fde6927abc08d.pdf",
+    "original_filename": "CCS_paper_feb_2026.pdf",
+    "status": "completed",
+    "priority": 0,
+    "chart_id": 2,
+    "assigned_to_user_id": 3,
+    "locked_at": null,
+    "locked_until": null,
+    "uploaded_at": "2026-08-24T18:21:17.789446+00:00",
+    "created_at": "2026-08-24T18:21:17.789446+00:00",
+    "updated_at": "2026-08-24T18:24:52.552108+00:00"
+  }
+]

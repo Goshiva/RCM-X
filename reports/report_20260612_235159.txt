@@ -1,0 +1,31 @@
+================================================================================
+RISK ADJUSTMENT ANALYSIS REPORT
+Generated: 2026-06-12 23:49:50
+================================================================================
+
+[PATIENT INFORMATION]
+Patient ID: PAT-001
+Age: 65
+Gender: M
+Insurance Model: Commercial
+
+[DIAGNOSES & HCC MAPPINGS]
+  • E11.9: Diabetes without complications (HCC: HCC035, RAF: 0.124)
+  • I10: Hypertension (HCC: HCC053, RAF: 0.011)
+
+[RISK ASSESSMENT]
+RAF Score: 0.456
+Risk Level: Low Risk
+
+[PREMIUM CALCULATION]
+Base Premium: $15,000.00
+Age Factor: 2.20x
+Gender Factor: 1.08x
+RAF Multiplier: 1.456x
+Adjusted Annual Premium: $51,891.84
+Adjusted Monthly Premium: $4,324.32
+
+[CODER RECOMMENDATIONS]
+  • Patient has low risk profile - standard care pathways appropriate
+
+================================================================================

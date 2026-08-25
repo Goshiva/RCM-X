@@ -1,0 +1,50 @@
+{
+  "demographics": {
+    "age": 65,
+    "gender": "M"
+  },
+  "insurance_model": "Commercial",
+  "patient_id": "PAT-001",
+  "premium_calculation": {
+    "adjusted_premium": 51891.84,
+    "age_factor": 2.2,
+    "base_premium": 15000,
+    "gender_factor": 1.08,
+    "insurance_model": "Commercial",
+    "monthly_premium": 4324.32,
+    "raf_multiplier": 1.456
+  },
+  "raf_calculation": {
+    "demographics": {
+      "age": 65,
+      "gender": "M"
+    },
+    "hcc_mappings": [
+      {
+        "hcc_id": "HCC035",
+        "hcc_name": "Diabetes without complications",
+        "icd10": "E11.9",
+        "raf_value": 0.124
+      },
+      {
+        "hcc_id": "HCC053",
+        "hcc_name": "Hypertension",
+        "icd10": "I10",
+        "raf_value": 0.011
+      }
+    ],
+    "hierarchy_issues": [],
+    "icd10_codes": [
+      "E11.9",
+      "I10",
+      "E78.5"
+    ],
+    "raf_score": 0.456
+  },
+  "recommendations": [
+    "Patient has low risk profile - standard care pathways appropriate"
+  ],
+  "report_date": "2026-06-12T23:51:50.083344",
+  "risk_level": "Low Risk",
+  "report_generated": "2026-06-12T23:49:50.342597"
+}
