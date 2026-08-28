@@ -21,9 +21,9 @@
     "user_id": 2,
     "failed_login_count": 0,
     "locked_until": null,
-    "last_login_at": "2026-08-24T17:25:24.750720+00:00",
+    "last_login_at": "2026-08-25T16:49:47.498984+00:00",
     "created_at": "2026-08-21T15:55:21.360550+00:00",
-    "updated_at": "2026-08-24T17:25:24.750738+00:00"
+    "updated_at": "2026-08-25T16:49:47.498997+00:00"
   },
   {
     "username": "coder",
@@ -34,9 +34,9 @@
     "user_id": 3,
     "failed_login_count": 0,
     "locked_until": null,
-    "last_login_at": "2026-08-25T15:20:51.574050+00:00",
+    "last_login_at": "2026-08-25T16:50:43.368295+00:00",
     "created_at": "2026-08-21T15:55:21.640909+00:00",
-    "updated_at": "2026-08-25T15:20:51.574070+00:00"
+    "updated_at": "2026-08-25T16:50:43.368306+00:00"
   },
   {
     "username": "supervisor_4528ac004e3d41b589b256d79756cb86",
