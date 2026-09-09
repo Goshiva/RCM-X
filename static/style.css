@@ -913,3 +913,278 @@ footer {
     color: #856404;
     border: 1px solid #ffeeba;
 }
+
+/* ==========================================================================
+   Clinical Evidence & MEAT Criteria Engine Styles
+   ========================================================================== */
+
+.audit-summary-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #eef4fc;
+    border: 1px solid #b8d5f8;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    font-size: 0.9em;
+    flex-wrap: wrap;
+}
+
+.summary-pill {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.85em;
+}
+
+.summary-pill.grade-a {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.summary-pill.grade-b {
+    background: #d1ecf1;
+    color: #0c5460;
+    border: 1px solid #bee5eb;
+}
+
+.summary-pill.grade-c {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeeba;
+}
+
+.summary-pill.grade-x {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+.suggestion-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+}
+
+.suggestion-title-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.canonical-badge {
+    background: #e9ecef;
+    color: #495057;
+    font-size: 0.75em;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.confidence-pill {
+    font-size: 0.75em;
+    color: #6c757d;
+    background: #f8f9fa;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid #e2e6ea;
+}
+
+.audit-pill {
+    font-size: 0.75em;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.audit-pill.audit-proof {
+    background: #28a745;
+    color: #ffffff;
+}
+
+.audit-pill.supported {
+    background: #17a2b8;
+    color: #ffffff;
+}
+
+.audit-pill.at-risk {
+    background: #ffc107;
+    color: #212529;
+}
+
+.audit-pill.negated {
+    background: #dc3545;
+    color: #ffffff;
+}
+
+/* MEAT Status Row & Badges */
+.meat-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 8px 0;
+    background: #fdfdfd;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid #edf0f2;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.meat-badge-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.meat-badge-label {
+    font-size: 0.8em;
+    font-weight: 600;
+    color: #495057;
+    margin-right: 2px;
+}
+
+.meat-letter {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 4px;
+    font-weight: 800;
+    font-size: 0.85em;
+    cursor: help;
+    transition: all 0.2s ease;
+}
+
+.meat-letter.active {
+    background: #28a745;
+    color: #ffffff;
+    box-shadow: 0 1px 3px rgba(40, 167, 69, 0.35);
+}
+
+.meat-letter.inactive {
+    background: #e9ecef;
+    color: #adb5bd;
+    border: 1px dashed #ced4da;
+}
+
+.meat-score-pill {
+    font-size: 0.78em;
+    font-weight: 700;
+    background: #e2e8f0;
+    color: #334155;
+    padding: 2px 7px;
+    border-radius: 10px;
+    margin-left: 4px;
+}
+
+.toggle-evidence-btn {
+    background: none;
+    border: 1px solid #cbd5e1;
+    color: #1e40af;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.8em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.toggle-evidence-btn:hover {
+    background: #f0f7ff;
+    border-color: #93c5fd;
+}
+
+/* Evidence Drawer */
+.evidence-drawer {
+    margin: 8px 0 12px 0;
+    padding: 10px;
+    background: #f8fafc;
+    border-left: 3px solid #3b82f6;
+    border-radius: 0 6px 6px 0;
+}
+
+.evidence-item {
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.evidence-item:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+.evidence-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+    font-size: 0.8em;
+}
+
+.evidence-type-badge {
+    background: #dbeafe;
+    color: #1e40af;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+.evidence-loc {
+    color: #64748b;
+}
+
+.btn-micro-pdf {
+    margin-left: auto;
+    background: white;
+    border: 1px solid #cbd5e1;
+    color: #2563eb;
+    font-size: 0.75em;
+    padding: 2px 7px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.btn-micro-pdf:hover {
+    background: #eff6ff;
+}
+
+.evidence-quote {
+    font-size: 0.85em;
+    font-style: italic;
+    color: #334155;
+    line-height: 1.4;
+    padding-left: 6px;
+}
+
+.query-opportunity-callout {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1e3a8a;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.83em;
+    margin: 8px 0;
+    line-height: 1.4;
+}
+
+.meat-warning {
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    color: #92400e;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.83em;
+    margin: 8px 0;
+}

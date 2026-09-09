@@ -213,6 +213,46 @@ def test_audit_logger():
         return False
 
 
+def test_meat_engine():
+    """Test Clinical Evidence & MEAT criteria engine"""
+    print("\n[TEST 8] Testing MEAT Criteria Engine...")
+    try:
+        from src.meat_engine import meat_engine, ClinicalSectionParser, AuditGrade
+        from backend.app.services.nlp_service import NLPService
+
+        sample_note = """
+ASSESSMENT & PLAN:
+1. Type 2 Diabetes Mellitus with hyperglycemia.
+   - Continue Metformin 1000 mg BID.
+   - Recheck HbA1c in 3 months.
+
+PAST MEDICAL HISTORY:
+1. COPD - diagnosed 2018
+"""
+
+        sections = ClinicalSectionParser.parse_document(sample_note)
+        analysis_dm = meat_engine.evaluate_condition("diabetes", sections)
+        assert analysis_dm.audit_grade == AuditGrade.AUDIT_PROOF, f"Expected AUDIT_PROOF, got {analysis_dm.audit_grade}"
+        assert analysis_dm.criteria["T"]["present"], "Expected Treat criterion to be present"
+        print("[OK] Diabetes evaluated as Audit-Proof with active Treatment")
+
+        analysis_copd = meat_engine.evaluate_condition("copd", sections)
+        assert analysis_copd.audit_grade == AuditGrade.PMH_ONLY_AT_RISK, f"Expected PMH_ONLY_AT_RISK for COPD, got {analysis_copd.audit_grade}"
+        print("[OK] PMH-only condition correctly flagged as At Risk")
+
+        nlp_service = NLPService()
+        result = nlp_service.analyze_text(sample_note)
+        assert "audit_summary" in result, "Expected audit_summary in NLPService output"
+        print("[OK] NLPService integration with MEAT engine verified")
+
+        return True
+    except Exception as e:
+        print(f"[FAIL] MEAT engine test error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def run_all_tests():
     """Run all validation tests"""
     print("="*70)
@@ -228,6 +268,7 @@ def run_all_tests():
         test_risk_calculator,
         test_nlp_extraction,
         test_audit_logger,
+        test_meat_engine,
     ]
     
     results = []

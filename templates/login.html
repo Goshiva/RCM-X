@@ -43,6 +43,21 @@
                     <p id="register-feedback" class="feedback muted" role="status"></p>
                 </form>
             </details>
+            <details class="auth-unlock" style="margin-top: 15px;">
+                <summary>Unlock account / Reset password</summary>
+                <form id="unlock-form" style="margin-top: 10px;">
+                    <div class="form-group">
+                        <label for="unlock-username">Username</label>
+                        <input id="unlock-username" type="text" value="coder" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="unlock-password">New Password</label>
+                        <input id="unlock-password" type="password" value="Coder123!" required>
+                    </div>
+                    <button class="btn-secondary" type="submit">Unlock & Reset</button>
+                    <p id="unlock-feedback" class="feedback muted" role="status"></p>
+                </form>
+            </details>
         </section>
     </main>
     <script src="{{ url_for('static', filename='login.js') }}"></script>

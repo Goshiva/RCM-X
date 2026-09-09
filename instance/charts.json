@@ -52,5 +52,23 @@
     "uploaded_at": "2026-08-25T16:50:22.372578+00:00",
     "created_at": "2026-08-25T16:50:22.372578+00:00",
     "updated_at": "2026-08-25T16:55:21.923653+00:00"
+  },
+  {
+    "file_path": "uploads\\127981572c544b1cbec4a54954be024b.pdf",
+    "original_filename": "March-2026._IMCA_Updated_case_study.pdf",
+    "status": "locked",
+    "patient_details": {},
+    "encounter_details": {},
+    "category": "",
+    "priority": 0,
+    "chart_id": 4,
+    "assigned_to_user_id": 3,
+    "l1_user_id": 3,
+    "l2_user_id": null,
+    "locked_at": "2026-09-09T15:55:05.232007+00:00",
+    "locked_until": "2026-09-09T16:55:05.232007+00:00",
+    "uploaded_at": "2026-09-09T15:48:17.404726+00:00",
+    "created_at": "2026-09-09T15:48:17.404726+00:00",
+    "updated_at": "2026-09-09T15:55:05.232051+00:00"
   }
 ]

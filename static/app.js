@@ -718,6 +718,18 @@ function highlightDiagnoses(text, medicalEntities) {
     return highlighted;
 }
 
+function toggleEvidenceDrawer(button) {
+    const suggestion = button.closest('.nlp-suggestion');
+    if (!suggestion) return;
+    const drawer = suggestion.querySelector('.evidence-drawer');
+    if (!drawer) return;
+    const isVisible = drawer.style.display !== 'none';
+    drawer.style.display = isVisible ? 'none' : 'block';
+    button.textContent = isVisible
+        ? button.textContent.replace('▴', '▾')
+        : button.textContent.replace('▾', '▴');
+}
+
 function renderNLPReview(nlpResult, savedDecisions = {}) {
     const container = document.getElementById('nlp-suggestions');
     const conditions = (nlpResult.entities || []).filter(entity => entity.type === 'condition');
@@ -725,7 +737,34 @@ function renderNLPReview(nlpResult, savedDecisions = {}) {
         container.textContent = 'No diagnosis suggestions found. Review the chart manually.';
         return;
     }
-    container.innerHTML = conditions.map(condition => {
+
+    const auditSummary = nlpResult.audit_summary || {};
+    let summaryHTML = '';
+    if (auditSummary.audit_proof_count !== undefined || auditSummary.supported_count !== undefined) {
+        summaryHTML = `
+            <div class="audit-summary-banner">
+                <span><strong>Audit Readiness:</strong></span>
+                <span class="summary-pill grade-a">${auditSummary.audit_proof_count || 0} Audit-Proof</span>
+                <span class="summary-pill grade-b">${auditSummary.supported_count || 0} Supported</span>
+                <span class="summary-pill grade-c">${auditSummary.at_risk_count || 0} At Risk</span>
+                ${auditSummary.negated_count ? `<span class="summary-pill grade-x">${auditSummary.negated_count} Negated</span>` : ''}
+            </div>
+        `;
+    }
+
+    let queryOpportunitiesHTML = '';
+    if (nlpResult.query_opportunities && nlpResult.query_opportunities.length) {
+        queryOpportunitiesHTML = `
+            <div class="query-opportunity-callout" style="margin-bottom:14px;">
+                <strong>💡 CDI Query Opportunities:</strong>
+                <ul style="margin:4px 0 0 18px;padding:0;">
+                    ${nlpResult.query_opportunities.map(q => `<li><strong>${escapeHTML(q.condition)}:</strong> ${escapeHTML(q.rationale)} <em>(${escapeHTML(q.query_recommendation)})</em></li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
+    const conditionsHTML = conditions.map(condition => {
         const suggestions = condition.icd10_suggestions || [];
         const workbookMatches = condition.workbook_matches || [];
         const allSuggestions = [...suggestions, ...workbookMatches.filter(match => !suggestions.some(item => item.code === match.code))];
@@ -734,17 +773,109 @@ function renderNLPReview(nlpResult, savedDecisions = {}) {
             ? `<br><small>Similar ICD-10 codes: ${workbookMatches.map(item => `${item.code} (${Math.round(item.similarity * 100)}% match)`).join(', ')}</small>`
             : '';
         const meat = condition.meat_evidence || [];
-        const meatSummary = meat.length
-            ? `<div class="meat-evidence"><strong>MEAT evidence:</strong> ${meat.map(item => `${item.type} · page ${item.page_number}`).join(', ')}</div>`
-            : '<div class="meat-warning">MEAT evidence not found. Verify the chart before adding this code.</div>';
+        const criteria = condition.meat_criteria || {};
+
+        const mCriterion = criteria.M || {};
+        const eCriterion = criteria.E || {};
+        const aCriterion = criteria.A || {};
+        const tCriterion = criteria.T || {};
+
+        const mPresent = mCriterion.present;
+        const ePresent = eCriterion.present;
+        const aPresent = aCriterion.present;
+        const tPresent = tCriterion.present;
+
+        const meatScore = condition.meat_score !== undefined ? condition.meat_score : meat.length;
+        const auditGrade = condition.audit_grade || (meatScore >= 2 ? 'AUDIT_PROOF' : (meatScore >= 1 ? 'SUPPORTED' : 'PMH_ONLY_AT_RISK'));
+        const auditLabel = condition.audit_grade_label || (meatScore >= 2 ? 'Audit-Proof (Grade A)' : (meatScore >= 1 ? 'Supported (Grade B)' : 'At Risk: PMH Only'));
+
+        let auditClass = 'at-risk';
+        if (auditGrade === 'AUDIT_PROOF') auditClass = 'audit-proof';
+        else if (auditGrade === 'SUPPORTED') auditClass = 'supported';
+        else if (auditGrade === 'NEGATED') auditClass = 'negated';
+
+        const meatStatusRow = `
+            <div class="meat-status-row">
+                <div class="meat-badge-group">
+                    <span class="meat-badge-label">MEAT:</span>
+                    <span class="meat-letter ${mPresent ? 'active' : 'inactive'}" title="Monitor: ${escapeHTML(mCriterion.evidence_text || 'Not documented')}">M</span>
+                    <span class="meat-letter ${ePresent ? 'active' : 'inactive'}" title="Evaluate: ${escapeHTML(eCriterion.evidence_text || 'Not documented')}">E</span>
+                    <span class="meat-letter ${aPresent ? 'active' : 'inactive'}" title="Assess: ${escapeHTML(aCriterion.evidence_text || 'Not documented')}">A</span>
+                    <span class="meat-letter ${tPresent ? 'active' : 'inactive'}" title="Treat: ${escapeHTML(tCriterion.evidence_text || 'Not documented')}">T</span>
+                    <span class="meat-score-pill">${meatScore}/4</span>
+                </div>
+                ${meat.length ? `<button type="button" class="toggle-evidence-btn">Clinical Evidence (${meat.length}) ▾</button>` : ''}
+            </div>
+        `;
+
+        const evidenceDrawer = meat.length ? `
+            <div class="evidence-drawer" style="display:none;">
+                ${meat.map(item => `
+                    <div class="evidence-item">
+                        <div class="evidence-meta">
+                            <span class="evidence-type-badge">${escapeHTML(item.type || item.criterion || 'Evidence')}</span>
+                            <span class="evidence-loc">Page ${item.page_number} · ${escapeHTML((item.section || '').replaceAll('_', ' ') || 'Clinical Note')}</span>
+                            <button type="button" class="btn-micro-pdf" data-snippet="${encodeURIComponent(item.text)}">Highlight in PDF</button>
+                        </div>
+                        <div class="evidence-quote">“${escapeHTML(item.text)}”</div>
+                    </div>
+                `).join('')}
+            </div>
+        ` : '<div class="meat-warning">⚠️ No active MEAT criteria verified for this encounter. RADV audit risk if coded without physician documentation.</div>';
+
+        const queryOppHTML = condition.query_opportunity
+            ? `<div class="query-opportunity-callout">💡 <strong>CDI Opportunity:</strong> ${escapeHTML(condition.query_opportunity)}</div>`
+            : '';
+
         const encodedDiagnosis = encodeURIComponent(condition.name);
         const encodedSuggestions = encodeURIComponent(JSON.stringify(allSuggestions));
         const encodedMeatEvidence = encodeURIComponent(JSON.stringify(meat));
         const saved = savedDecisions[condition.name] || {};
         const defaultCode = saved.icd10_code || (allSuggestions[0] && allSuggestions[0].code) || '';
-        const pageNumber = saved.page_number || '';
-        return `<div class="nlp-suggestion" data-diagnosis="${encodedDiagnosis}"><strong>${escapeHTML(condition.name)}</strong> <span>${Math.round((condition.confidence || 0) * 100)}% confidence</span><button type="button" class="view-in-pdf" data-term="${encodedDiagnosis}">View in PDF</button><br><small>${escapeHTML(codes)}</small>${similar}${meatSummary}<div class="diagnosis-edit-fields"><label>ICD-10 code <input class="diagnosis-code-input" value="${escapeHTML(defaultCode)}" placeholder="E11.9"></label><label>Page no. <input class="diagnosis-page-input" type="number" min="1" value="${escapeHTML(pageNumber)}" placeholder="1"></label></div><div class="diagnosis-actions"><button type="button" class="decision-choice accept-choice" data-decision="accepted">Add</button><button type="button" class="decision-choice reject-choice" data-decision="rejected">ASR</button><select class="comment-select" disabled><option value="">Select reason</option></select><button type="button" class="save-decision" data-diagnosis="${encodedDiagnosis}" data-suggestions="${encodedSuggestions}" data-meat-evidence="${encodedMeatEvidence}">Save</button><span class="decision-status"></span></div></div>`;
+        const pageNumber = saved.page_number || (meat[0] && meat[0].page_number) || '';
+
+        return `
+            <div class="nlp-suggestion" data-diagnosis="${encodedDiagnosis}">
+                <div class="suggestion-header">
+                    <div class="suggestion-title-group">
+                        <strong>${escapeHTML(condition.name)}</strong>
+                        ${condition.canonical_name && condition.canonical_name.toLowerCase() !== condition.name.toLowerCase() ? `<span class="canonical-badge">${escapeHTML(condition.canonical_name)}</span>` : ''}
+                        <span class="confidence-pill">${Math.round((condition.confidence || 0) * 100)}% conf</span>
+                        <span class="audit-pill ${auditClass}">${escapeHTML(auditLabel)}</span>
+                    </div>
+                    <button type="button" class="view-in-pdf" data-term="${encodedDiagnosis}">View in PDF</button>
+                </div>
+                ${meatStatusRow}
+                ${evidenceDrawer}
+                ${queryOppHTML}
+                <small>${escapeHTML(codes)}</small>${similar}
+                <div class="diagnosis-edit-fields">
+                    <label>ICD-10 code <input class="diagnosis-code-input" value="${escapeHTML(defaultCode)}" placeholder="E11.9"></label>
+                    <label>Page no. <input class="diagnosis-page-input" type="number" min="1" value="${escapeHTML(pageNumber)}" placeholder="1"></label>
+                </div>
+                <div class="diagnosis-actions">
+                    <button type="button" class="decision-choice accept-choice" data-decision="accepted">Add</button>
+                    <button type="button" class="decision-choice reject-choice" data-decision="rejected">ASR</button>
+                    <select class="comment-select" disabled><option value="">Select reason</option></select>
+                    <button type="button" class="save-decision" data-diagnosis="${encodedDiagnosis}" data-suggestions="${encodedSuggestions}" data-meat-evidence="${encodedMeatEvidence}">Save</button>
+                    <span class="decision-status"></span>
+                </div>
+            </div>
+        `;
     }).join('');
+
+    container.innerHTML = summaryHTML + queryOpportunitiesHTML + conditionsHTML;
+
+    container.querySelectorAll('.toggle-evidence-btn').forEach(btn => {
+        btn.addEventListener('click', () => toggleEvidenceDrawer(btn));
+    });
+    container.querySelectorAll('.btn-micro-pdf').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const snippet = decodeURIComponent(btn.dataset.snippet);
+            const searchWords = snippet.split(/\s+/).slice(0, 5).join(' ');
+            focusDiagnosisInPdf(searchWords);
+        });
+    });
     container.querySelectorAll('.decision-choice').forEach(choice => {
         choice.addEventListener('click', () => {
             const reason = choice.parentElement.querySelector('.comment-select');

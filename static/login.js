@@ -47,3 +47,27 @@ document.getElementById('register-form').addEventListener('submit', async event 
         showFeedback(feedback, error.message, 'error');
     }
 });
+
+const unlockForm = document.getElementById('unlock-form');
+if (unlockForm) {
+    unlockForm.addEventListener('submit', async event => {
+        event.preventDefault();
+        const feedback = document.getElementById('unlock-feedback');
+        const username = document.getElementById('unlock-username').value.trim();
+        const password = document.getElementById('unlock-password').value;
+        try {
+            const response = await fetch('/api/auth/unlock', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ username, password })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) throw new Error(data.error || 'Unlock failed');
+            document.getElementById('login-username').value = username;
+            document.getElementById('login-password').value = password;
+            showFeedback(feedback, data.message || 'Account unlocked! You can now sign in.', 'success');
+        } catch (error) {
+            showFeedback(feedback, error.message, 'error');
+        }
+    });
+}

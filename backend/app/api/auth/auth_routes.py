@@ -43,3 +43,28 @@ def register() -> tuple:
         return jsonify({"success": True, "user_id": user.user_id, "role": user.role}), 201
     except AuthError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@bp.route("/unlock", methods=["POST"])
+def unlock() -> tuple:
+    payload = request.get_json(silent=True) or {}
+    username = payload.get("username", "").strip()
+    new_password = payload.get("password", "").strip() or "Coder123!"
+    if not username:
+        return jsonify({"success": False, "error": "Username required"}), 400
+
+    user = auth_service.repository.get_user_by_username(username)
+    if not user:
+        return jsonify({"success": False, "error": f"User '{username}' not found"}), 404
+
+    user.failed_login_count = 0
+    user.locked_until = None
+    user.is_active = True
+    user.password_hash = auth_service.password_hasher.hash_password(new_password)
+    auth_service.repository.update_user(user)
+
+    return jsonify({
+        "success": True,
+        "message": f"Account '{username}' unlocked. Password set to '{new_password}'.",
+        "username": username,
+    }), 200

@@ -48,8 +48,24 @@ class JsonUserRepository(InMemoryUserRepository):
 
     def __init__(self, file_path: str = "instance/users.json") -> None:
         self.file_path = file_path
+        self._last_mtime: Optional[float] = None
         super().__init__()
         self._load()
+
+    def _ensure_fresh(self) -> None:
+        if not os.path.exists(self.file_path):
+            return
+        mtime = os.path.getmtime(self.file_path)
+        if self._last_mtime is None or mtime > self._last_mtime:
+            self._load()
+
+    def get_user_by_username(self, username: str) -> Optional[UserRecord]:
+        self._ensure_fresh()
+        return super().get_user_by_username(username)
+
+    def get_user_by_id(self, user_id: int) -> Optional[UserRecord]:
+        self._ensure_fresh()
+        return super().get_user_by_id(user_id)
 
     def create_user(self, user: UserRecord) -> UserRecord:
         user = super().create_user(user)
@@ -64,6 +80,10 @@ class JsonUserRepository(InMemoryUserRepository):
     def _load(self) -> None:
         if not os.path.exists(self.file_path):
             return
+        self._last_mtime = os.path.getmtime(self.file_path)
+        self._users.clear()
+        self._users_by_id.clear()
+        self._next_id = 1
         used_ids = set()
         normalized = False
         with open(self.file_path, "r", encoding="utf-8") as stream:
@@ -102,3 +122,5 @@ class JsonUserRepository(InMemoryUserRepository):
         with open(temporary_path, "w", encoding="utf-8") as stream:
             json.dump(users, stream, indent=2)
         os.replace(temporary_path, self.file_path)
+        if os.path.exists(self.file_path):
+            self._last_mtime = os.path.getmtime(self.file_path)

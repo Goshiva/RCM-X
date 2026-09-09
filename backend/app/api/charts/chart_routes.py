@@ -195,6 +195,13 @@ def chart_file(chart_id: int):
         for condition, synonyms in MEDICAL_CONDITIONS_DB.items():
             if requested_term.lower() == condition.lower():
                 terms.update(synonyms)
+        from src.meat_engine import CLINICAL_ONTOLOGY
+        for key, data in CLINICAL_ONTOLOGY.items():
+            if (
+                requested_term.lower() in [key.lower(), data["canonical"].lower()]
+                or requested_term.lower() in [s.lower() for s in data["synonyms"]]
+            ):
+                terms.update(data["synonyms"])
 
     if not terms:
         return send_file(chart.file_path, mimetype="application/pdf", as_attachment=False)
