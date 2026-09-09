@@ -6,6 +6,7 @@ from typing import Optional
 
 from backend.app.models.chart import ChartRecord
 from backend.app.repositories.chart_repository import InMemoryChartRepository
+from backend.app.core.config import WIP_MAX_CHARTS
 
 
 class ChartAssignmentError(Exception):
@@ -25,7 +26,12 @@ class ChartAssignmentService:
         self.lock_duration_minutes = lock_duration_minutes
         self._lock = RLock()
 
-    def claim_next_available_chart(self, user_id: int, actor_role: str = "coder") -> Optional[ChartRecord]:
+    def claim_next_available_chart(
+        self,
+        user_id: int,
+        actor_role: str = "coder",
+        resume_existing: bool = False,
+    ) -> Optional[ChartRecord]:
         if actor_role not in {"coder", "coder_l1", "coder_l2", "admin", "master_admin"}:
             raise ChartAssignmentError("Unsupported role")
 
@@ -41,9 +47,13 @@ class ChartAssignmentService:
                 and chart.status in ({"audit_locked"} if stage == "l2" else {"locked", "in_progress"})
                 and (not chart.locked_until or chart.locked_until > now)
             ]
-            if existing:
+            if resume_existing and existing:
                 existing.sort(key=lambda item: item.chart_id)
                 return existing[0]
+            if len(existing) >= WIP_MAX_CHARTS:
+                raise ChartAssignmentError(
+                    f"WIP limit reached: a user may hold at most {WIP_MAX_CHARTS} charts"
+                )
 
             candidates = [
                 chart for chart in self.repository.list_charts()
@@ -62,6 +72,15 @@ class ChartAssignmentService:
             selected.locked_at = now
             selected.locked_until = now + timedelta(minutes=self.lock_duration_minutes)
             return self.repository.update_chart(selected)
+
+    def get_user_wip(self, user_id: int, actor_role: str = "coder") -> list[ChartRecord]:
+        stage = "l2" if actor_role == "coder_l2" else "l1"
+        assigned_field = "l2_user_id" if stage == "l2" else "l1_user_id"
+        active_statuses = {"audit_locked"} if stage == "l2" else {"locked", "in_progress"}
+        return [
+            chart for chart in self.repository.list_charts()
+            if getattr(chart, assigned_field) == user_id and chart.status in active_statuses
+        ]
 
     def submit_chart(self, chart_id: int, user_id: int, actor_role: str) -> ChartRecord:
         """Move an assigned chart from L1 work to L2 audit, or from L2 to archive."""

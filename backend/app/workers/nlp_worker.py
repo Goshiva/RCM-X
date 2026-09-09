@@ -8,6 +8,7 @@ from backend.app.services.nlp_service import NLPService
 from backend.app.repositories.chart_repository import InMemoryChartRepository
 from backend.app.services.audit_service import AuditService
 from backend.app.services.risk_adjustment_service import RiskAdjustmentService
+from backend.app.repositories.risk_adjustment_repository import InMemoryRiskAdjustmentRepository
 
 
 class InMemoryNLPWorker:
@@ -16,12 +17,16 @@ class InMemoryNLPWorker:
     This is a prototype. Replace with an async broker (Celery/RQ) for production.
     """
 
-    def __init__(self, repository: Optional[InMemoryChartRepository] = None) -> None:
+    def __init__(
+        self,
+        repository: Optional[InMemoryChartRepository] = None,
+        risk_service: Optional[RiskAdjustmentService] = None,
+    ) -> None:
         self.queue: List[int] = []
         self.repo = repository or InMemoryChartRepository()
         self.nlp = NLPService()
         self.audit = AuditService()
-        self.risk = RiskAdjustmentService()
+        self.risk = risk_service or RiskAdjustmentService(repository=InMemoryRiskAdjustmentRepository())
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -36,9 +41,6 @@ class InMemoryNLPWorker:
         chart = self.repo.get_chart(chart_id)
         if not chart:
             return
-
-        chart.status = "in_progress"
-        self.repo.update_chart(chart)
 
         try:
             nlp_result = self.nlp.extract_pdf(chart.file_path)
@@ -66,7 +68,6 @@ class InMemoryNLPWorker:
                 user_id=0,
             )
 
-            chart.status = "queued"
         except Exception as exc:
             chart.status = "failed"
             self.audit.record_event(

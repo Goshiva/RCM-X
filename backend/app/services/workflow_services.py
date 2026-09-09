@@ -10,7 +10,7 @@ from backend.app.workers.nlp_worker import InMemoryNLPWorker
 
 chart_repository = JsonChartRepository(CHARTS_FILE)
 chart_assignment_service = ChartAssignmentService(repository=chart_repository)
-nlp_worker = InMemoryNLPWorker(repository=chart_repository)
 risk_service = RiskAdjustmentService()
+nlp_worker = InMemoryNLPWorker(repository=chart_repository, risk_service=risk_service)
 audit_service = AuditService()
 icd_validator = ICDValidationService()

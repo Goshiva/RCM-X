@@ -3,12 +3,15 @@ from __future__ import annotations
 import os
 import io
 from uuid import uuid4
+from pathlib import Path
 
 import fitz
 from flask import Blueprint, jsonify, request, send_file
 from werkzeug.utils import secure_filename
 
 from backend.app.core.middleware import require_auth, require_roles
+from backend.app.core.config import WIP_MAX_CHARTS
+from backend.app.core.config import WIP_MAX_CHARTS
 from backend.app.models.chart import ChartRecord
 from src.nlp_identifier import MEDICAL_CONDITIONS_DB  # Legacy condition database
 from src.hcc_engine import get_hcc_from_icd10
@@ -24,6 +27,24 @@ from backend.app.services.workflow_services import (
 
 bp = Blueprint("charts", __name__, url_prefix="/api/charts")
 icd_mapper = ICD10Mapper()
+
+
+def _latest_nlp_result(chart_id: int) -> dict:
+    records = risk_service.repository.get_by_chart(chart_id)
+    for record in reversed(records):
+        result = (record.user_inputs or {}).get("nlp_result")
+        if result:
+            return result
+    return {}
+
+
+def _resolve_chart_file(file_path: str) -> str | None:
+    candidates = [
+        Path(file_path),
+        Path(__file__).resolve().parents[4] / file_path,
+        Path(os.getenv("UPLOAD_FOLDER", "uploads")) / Path(file_path).name,
+    ]
+    return next((str(candidate) for candidate in candidates if candidate.is_file()), None)
 
 
 @bp.route("/upload", methods=["POST"])
@@ -48,9 +69,7 @@ def upload_chart():
         ChartRecord(file_path=file_path, original_filename=original_filename)
     )
     nlp_worker.enqueue(chart.chart_id)
-    # Local mode has no broker-backed worker; process the queued chart now.
-    if not os.getenv("REDIS_BROKER_URL"):
-        nlp_worker.process_next()
+    nlp_worker.run()
     audit_service.record_event(
         action_type="chart_uploaded",
         entity_type="chart",
@@ -90,8 +109,6 @@ def upload_charts_bulk():
             ChartRecord(file_path=file_path, original_filename=original_filename)
         )
         nlp_worker.enqueue(chart.chart_id)
-        if not os.getenv("REDIS_BROKER_URL"):
-            nlp_worker.process_next()
         audit_service.record_event(
             action_type="chart_uploaded",
             entity_type="chart",
@@ -104,7 +121,21 @@ def upload_charts_bulk():
 
     if not created:
         return jsonify({"success": False, "error": "only_pdf_files_supported"}), 400
+    nlp_worker.run()
     return jsonify({"success": True, "charts": created, "count": len(created), "bucket": 1}), 201
+
+
+@bp.route("/upload-config", methods=["GET"])
+@require_auth
+@require_roles("manager", "supervisor", "admin", "master_admin")
+def upload_config():
+    upload_folder = Path(os.getenv("UPLOAD_FOLDER", "uploads")).resolve()
+    return jsonify({
+        "success": True,
+        "upload_folder": str(upload_folder),
+        "processing": "background",
+        "message": "PDFs are stored immediately and NLP processing runs in the background.",
+    }), 200
 
 
 @bp.route("/claim", methods=["POST"])
@@ -119,6 +150,15 @@ def claim_chart():
         )
         if not chart:
             return jsonify({"success": True, "chart": None, "message": "No available chart"}), 200
+        audit_service.record_event(
+            action_type="chart_claimed",
+            entity_type="chart",
+            details={"chart_id": chart.chart_id, "status": chart.status},
+            user_id=request.current_user.user_id,
+            chart_id=chart.chart_id,
+            entity_id=str(chart.chart_id),
+            actor_role=request.current_user.role,
+        )
         return jsonify({"success": True, "chart": {
             "chart_id": chart.chart_id,
             "file_path": chart.file_path,
@@ -127,7 +167,29 @@ def claim_chart():
             "locked_until": chart.locked_until.isoformat() if chart.locked_until else None,
         }}), 200
     except ChartAssignmentError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": str(exc)}), 409
+
+
+@bp.route("/wip", methods=["GET"])
+@require_auth
+@require_roles("coder", "coder_l1", "coder_l2")
+def work_in_progress():
+    charts = chart_assignment_service.get_user_wip(
+        request.current_user.user_id,
+        request.current_user.role,
+    )
+    return jsonify({
+        "success": True,
+        "limit": WIP_MAX_CHARTS,
+        "count": len(charts),
+        "remaining": max(0, WIP_MAX_CHARTS - len(charts)),
+        "charts": [{
+            "chart_id": chart.chart_id,
+            "original_filename": chart.original_filename,
+            "status": chart.status,
+            "locked_until": chart.locked_until.isoformat() if chart.locked_until else None,
+        } for chart in charts],
+    }), 200
 
 
 @bp.route("/current", methods=["GET"])
@@ -137,9 +199,19 @@ def current_chart():
     chart = chart_assignment_service.claim_next_available_chart(
         user_id=request.current_user.user_id,
         actor_role=request.current_user.role,
+        resume_existing=True,
     )
     if not chart:
         return jsonify({"success": True, "chart": None}), 200
+    audit_service.record_event(
+        action_type="chart_claimed",
+        entity_type="chart",
+        details={"chart_id": chart.chart_id, "status": chart.status, "source": "current_chart"},
+        user_id=request.current_user.user_id,
+        chart_id=chart.chart_id,
+        entity_id=str(chart.chart_id),
+        actor_role=request.current_user.role,
+    )
     return jsonify({
         "success": True,
         "chart": {
@@ -163,6 +235,15 @@ def release_chart(chart_id: int):
             actor_user_id=request.current_user.user_id,
             actor_role=request.current_user.role,
         )
+        audit_service.record_event(
+            action_type="chart_released",
+            entity_type="chart",
+            details={"chart_id": chart_id},
+            user_id=request.current_user.user_id,
+            chart_id=chart_id,
+            entity_id=str(chart_id),
+            actor_role=request.current_user.role,
+        )
         return jsonify({"success": released}), 200 if released else 404
     except ChartAssignmentError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
@@ -173,15 +254,25 @@ def release_chart(chart_id: int):
 @require_roles("coder", "coder_l1", "coder_l2", "manager", "supervisor", "admin", "master_admin")
 def chart_file(chart_id: int):
     chart = chart_assignment_service.repository.get_chart(chart_id)
-    if not chart or not os.path.isfile(chart.file_path):
+    chart_path = _resolve_chart_file(chart.file_path) if chart else None
+    if not chart or not chart_path:
         return jsonify({"success": False, "error": "file_not_found"}), 404
+    audit_service.record_event(
+        action_type="chart_previewed",
+        entity_type="chart",
+        details={"chart_id": chart_id, "term": request.args.get("term", "").strip()},
+        user_id=request.current_user.user_id,
+        chart_id=chart_id,
+        entity_id=str(chart_id),
+        actor_role=request.current_user.role,
+    )
 
     latest = risk_service.get_latest_for_chart(chart_id)
     requested_term = request.args.get("term", "").strip()
     terms = set()
     page_number = None
     if latest:
-        nlp_result = (latest.user_inputs or {}).get("nlp_result", {})
+        nlp_result = _latest_nlp_result(chart_id)
         for entity in nlp_result.get("entities", []):
             if entity.get("type") != "condition":
                 continue
@@ -204,10 +295,10 @@ def chart_file(chart_id: int):
                 terms.update(data["synonyms"])
 
     if not terms:
-        return send_file(chart.file_path, mimetype="application/pdf", as_attachment=False)
+        return send_file(chart_path, mimetype="application/pdf", as_attachment=False)
 
     try:
-        document = fitz.open(chart.file_path)
+        document = fitz.open(chart_path)
         annotation_count = 0
         for page in document:
             for term in terms:
@@ -235,7 +326,7 @@ def chart_file(chart_id: int):
         document.close()
     except (OSError, RuntimeError, ValueError):
         pass
-    return send_file(chart.file_path, mimetype="application/pdf", as_attachment=False)
+    return send_file(chart_path, mimetype="application/pdf", as_attachment=False)
 
 
 @bp.route("/<int:chart_id>/reassign", methods=["POST"])
@@ -277,9 +368,26 @@ def get_chart(chart_id: int):
     chart = chart_assignment_service.repository.get_chart(chart_id)
     if not chart:
         return jsonify({"success": False, "error": "not_found"}), 404
+    audit_service.record_event(
+        action_type="chart_opened",
+        entity_type="chart",
+        details={"chart_id": chart_id},
+        user_id=request.current_user.user_id,
+        chart_id=chart_id,
+        entity_id=str(chart_id),
+        actor_role=request.current_user.role,
+    )
 
     latest = risk_service.get_latest_for_chart(chart_id)
-    nlp_result = (latest.user_inputs or {}).get("nlp_result", {}) if latest else {}
+    l1_submission = next(
+        (
+            record for record in risk_service.repository.get_by_chart(chart_id)
+            if chart.l1_user_id and record.user_id == chart.l1_user_id
+        ),
+        None,
+    )
+    nlp_result = _latest_nlp_result(chart_id)
+    audit_quality = (latest.user_inputs or {}).get("audit_quality", {}) if latest else {}
     return jsonify({
         "success": True,
         "chart": {
@@ -295,8 +403,58 @@ def get_chart(chart_id: int):
             "captured_icd10_codes": latest.captured_icd10_codes if latest else [],
             "user_inputs": latest.user_inputs if latest else {},
             "nlp_result": nlp_result,
+            "l1_captured_icd10_codes": l1_submission.captured_icd10_codes if l1_submission else [],
+            "audit_quality": audit_quality,
+            "encounters": (latest.user_inputs or {}).get("encounters", []) if latest else [],
         }
     }), 200
+
+
+@bp.route("/<int:chart_id>/encounters", methods=["POST"])
+@require_auth
+@require_roles("coder", "coder_l1", "coder_l2")
+def add_encounter(chart_id: int):
+    payload = request.get_json(silent=True) or {}
+    date_of_service = str(payload.get("date_of_service", "")).strip()
+    if not date_of_service:
+        return jsonify({"success": False, "error": "date_of_service_required"}), 400
+    try:
+        from datetime import date
+        date.fromisoformat(date_of_service)
+    except ValueError:
+        return jsonify({"success": False, "error": "date_of_service_must_be_yyyy_mm_dd"}), 400
+
+    latest = risk_service.get_latest_for_chart(chart_id)
+    inputs = dict(latest.user_inputs if latest else {})
+    encounters = list(inputs.get("encounters", []))
+    encounter = {
+        "encounter_id": f"{chart_id}-{date_of_service}-{len(encounters) + 1}",
+        "date_of_service": date_of_service,
+        "provider": str(payload.get("provider", "")).strip(),
+        "place_of_service": str(payload.get("place_of_service", "")).strip(),
+        "note": str(payload.get("note", "")).strip(),
+        "codes": [],
+    }
+    encounters.append(encounter)
+    inputs["encounters"] = encounters
+    record = risk_service.save_submission(
+        chart_id=chart_id,
+        user_id=request.current_user.user_id,
+        user_inputs=inputs,
+        captured_icd10_codes=latest.captured_icd10_codes if latest else [],
+        mapped_hcc_versions=latest.mapped_hcc_versions if latest else [],
+        calculated_raf_score=latest.calculated_raf_score if latest else None,
+    )
+    audit_service.record_event(
+        action_type="encounter_created",
+        entity_type="encounter",
+        details=encounter,
+        user_id=request.current_user.user_id,
+        chart_id=chart_id,
+        entity_id=encounter["encounter_id"],
+        actor_role=request.current_user.role,
+    )
+    return jsonify({"success": True, "encounter": encounter, "input_id": record.input_id}), 201
 
 
 @bp.route("/<int:chart_id>/add-code", methods=["POST"])
@@ -310,18 +468,26 @@ def add_code(chart_id: int):
         return jsonify({"success": False, "error": "no_code_provided"}), 400
     if not icd_validator.validate(code):
         return jsonify({"success": False, "error": "invalid_icd10_code"}), 400
+    encounter_id = str(payload.get("encounter_id", "")).strip()
 
     latest = risk_service.get_latest_for_chart(chart_id)
+    encounters = list((latest.user_inputs if latest else {}).get("encounters", []))
+    encounter = next((item for item in encounters if item.get("encounter_id") == encounter_id), None)
+    if not encounter:
+        return jsonify({"success": False, "error": "valid_encounter_required_before_adding_code"}), 400
     existing_codes = latest.captured_icd10_codes if latest else []
     if code in existing_codes:
         return jsonify({"success": False, "error": "code_already_present"}), 400
 
     updated_codes = existing_codes + [code]
+    encounter["codes"] = list(dict.fromkeys([*encounter.get("codes", []), code]))
+    updated_inputs = dict(latest.user_inputs if latest else {})
+    updated_inputs.update({"action": "add_code", "added_code": code, "encounters": encounters})
 
     record = risk_service.save_submission(
         chart_id=chart_id,
         user_id=user_id,
-        user_inputs={"action": "add_code", "added_code": code},
+        user_inputs=updated_inputs,
         captured_icd10_codes=updated_codes,
         mapped_hcc_versions=[],
         calculated_raf_score=None,
@@ -330,10 +496,11 @@ def add_code(chart_id: int):
     audit_service.record_event(
         action_type="code_added",
         entity_type="chart",
-        details={"chart_id": chart_id, "added_code": code},
+        details={"chart_id": chart_id, "added_code": code, "encounter_id": encounter_id},
         user_id=user_id,
         chart_id=chart_id,
         entity_id=str(record.input_id),
+        actor_role=request.current_user.role,
     )
 
     return jsonify({"success": True, "input_id": record.input_id, "captured_icd10_codes": updated_codes}), 200
@@ -391,6 +558,7 @@ def diagnosis_decision(chart_id: int):
         user_id=request.current_user.user_id,
         chart_id=chart_id,
         entity_id=str(record.input_id),
+        actor_role=request.current_user.role,
     )
     return jsonify({"success": True, "diagnosis": diagnosis, "decision": decision, "secondary_comment": secondary_comment}), 200
 
@@ -400,13 +568,14 @@ def diagnosis_decision(chart_id: int):
 @require_roles("coder", "coder_l1", "coder_l2", "manager", "supervisor", "admin", "master_admin")
 def icd_evidence(chart_id: int):
     chart = chart_assignment_service.repository.get_chart(chart_id)
-    if not chart or not os.path.isfile(chart.file_path):
+    chart_path = _resolve_chart_file(chart.file_path) if chart else None
+    if not chart or not chart_path:
         return jsonify({"success": False, "error": "file_not_found"}), 404
     latest = risk_service.get_latest_for_chart(chart_id)
     codes = latest.captured_icd10_codes if latest else []
     mappings = latest.mapped_hcc_versions if latest else []
     evidence = []
-    document = fitz.open(chart.file_path)
+    document = fitz.open(chart_path)
     try:
         for code in codes:
             pages = [page.number + 1 for page in document if page.search_for(code)]

@@ -25,4 +25,9 @@ CMS_MODELS_FILE = os.getenv(
 )
 CMS_MODEL_FAMILY = os.getenv("CMS_MODEL_FAMILY", "CMS-HCC")
 CMS_MODEL_VERSION = os.getenv("CMS_MODEL_VERSION", "V28")
+WIP_MAX_CHARTS = int(os.getenv("WIP_MAX_CHARTS", "10"))
 ICD_DIAGNOSIS_FILE = os.getenv("ICD_DIAGNOSIS_FILE", "")
+AUDIT_LOG_FILE = os.getenv(
+    "AUDIT_LOG_FILE",
+    str(Path(__file__).resolve().parents[3] / "audit_logs" / "coding_activity.jsonl"),
+)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 from typing import Dict, Any, List
+from datetime import datetime
 
 from src.hcc_engine import get_hcc_from_icd10
 from src.icd_mapper import ICD10Mapper
@@ -18,6 +19,19 @@ class NLPService:
     """Medical text extraction and ICD/HCC suggestion service."""
 
     ICD10_PATTERN = re.compile(r"\b[A-TV-Z][0-9]{1,3}(?:\.[0-9A-TV-Z]{1,4})?\b")
+    MEAT_PATTERNS = {
+        "Monitor": re.compile(r"\b(?:monitor|monitoring|follow[- ]?up|recheck|trend|stable|surveillance|track)\b", re.I),
+        "Evaluate": re.compile(r"\b(?:evaluate|evaluation|exam|reviewed|result|lab|test|imaging|referral|consult)\b", re.I),
+        "Assess": re.compile(r"\b(?:assess|assessment|diagnos|severity|status|counsel|discuss|differential)\w*\b", re.I),
+        "Treat": re.compile(r"\b(?:treat|treatment|continue|prescri|medication|therapy|referred|surgery|dose)\w*\b", re.I),
+    }
+    DATE_PATTERNS = (
+        re.compile(r"\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b"),
+        re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](20\d{2})\b"),
+    )
+    SECTION_PATTERN = re.compile(
+        r"(?im)^\s*(assessment and plan|assessment|plan|impression|diagnosis|medications?|history of present illness|hpi)\s*:?\s*$"
+    )
 
     def __init__(self) -> None:
         self.icd_mapper = ICD10Mapper()
@@ -42,6 +56,8 @@ class NLPService:
 
     def analyze_text(self, text: str, pages: List[str] | None = None) -> Dict[str, Any]:
         insights = extract_nlp_insights(text)
+        dates = self._extract_service_dates(text)
+        sections = [match.group(1).lower() for match in self.SECTION_PATTERN.finditer(text)]
         entities: List[Dict[str, Any]] = []
         ents = insights["entities"].get("entities", {})
         
@@ -83,9 +99,16 @@ class NLPService:
                 "icd10_suggestions": suggestions,
                 "workbook_matches": workbook_matches,
                 "meat_evidence": evidence_snippets,
-                "meat_criteria": meat_analysis.criteria,
+                "meat_criteria": {
+                    key: value.__dict__ if hasattr(value, "__dict__") else value
+                    for key, value in meat_analysis.criteria.items()
+                },
                 "meat_score": meat_analysis.meat_score,
-                "audit_grade": meat_analysis.audit_grade,
+                "audit_grade": (
+                    meat_analysis.audit_grade.value
+                    if hasattr(meat_analysis.audit_grade, "value")
+                    else meat_analysis.audit_grade
+                ),
                 "audit_grade_label": meat_analysis.audit_grade_label,
                 "is_negated": meat_analysis.is_negated,
                 "is_pmh_only": meat_analysis.is_pmh_only,
@@ -96,6 +119,10 @@ class NLPService:
                           else ("negated" if meat_analysis.is_negated
                                 else ("pmh_only" if meat_analysis.is_pmh_only else "not_found")))
                 ),
+                "clinical_sections": [
+                    section.__dict__ if hasattr(section, "__dict__") else section
+                    for section in sections
+                ],
             })
 
         for code in sorted({m.group(0).upper() for m in self.ICD10_PATTERN.finditer(text)}):
@@ -108,6 +135,7 @@ class NLPService:
                 "short_description": workbook_diagnosis["short_description"] if workbook_diagnosis else None,
                 "hcc": mapping,
                 "confidence": 0.75,
+                "evidence": self._code_evidence(code, text, pages or []),
             })
 
         doc_analysis = self.meat_engine.analyze_document(
@@ -121,11 +149,50 @@ class NLPService:
             "text": text,
             "document_type": insights["document_type"],
             "confidence": insights["confidence"],
+            "service_dates": dates,
+            "clinical_sections": [
+                section.__dict__ if hasattr(section, "__dict__") else section
+                for section in sections
+            ],
             "medical_entities": insights["entities"],
             "entities": entities,
             "audit_summary": doc_analysis.get("audit_summary", {}),
             "query_opportunities": doc_analysis.get("query_opportunities", []),
         }
+
+    def _extract_service_dates(self, text: str) -> List[str]:
+        dates = set()
+        for pattern in self.DATE_PATTERNS:
+            for match in pattern.finditer(text):
+                parts = [int(value) for value in match.groups()]
+                year, month, day = (parts if parts[0] > 1000 else (parts[2], parts[0], parts[1]))
+                try:
+                    dates.add(datetime(year, month, day).date().isoformat())
+                except ValueError:
+                    continue
+        return sorted(dates)
+
+    def _nearby_sections(self, diagnosis: str, text: str, sections: List[str]) -> List[str]:
+        lowered = text.lower()
+        position = lowered.find(diagnosis.lower())
+        if position < 0:
+            return []
+        preceding = text[:position]
+        match = list(self.SECTION_PATTERN.finditer(preceding))
+        return [match[-1].group(1).lower()] if match else sections[:1]
+
+    def _code_evidence(self, code: str, text: str, pages: List[str]) -> Dict[str, Any]:
+        source_pages = pages or [text]
+        matches = []
+        for page_number, page_text in enumerate(source_pages, start=1):
+            for match in re.finditer(re.escape(code), page_text, re.I):
+                start = max(0, match.start() - 90)
+                end = min(len(page_text), match.end() + 140)
+                matches.append({
+                    "page_number": page_number,
+                    "text": " ".join(page_text[start:end].split()),
+                })
+        return {"match_count": len(matches), "matches": matches[:5]}
 
     def _find_meat_evidence(self, diagnosis: str, text: str, pages: List[str]) -> List[Dict[str, Any]]:
         """Legacy helper now powered by MEATEngine."""

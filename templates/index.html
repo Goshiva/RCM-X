@@ -3,15 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Insurance Risk Adjustment Tool</title>
+    <title>HCC Command Center</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container">
         <header class="header">
             <div class="header-content">
-                <h1>💊 Insurance Risk Adjustment Tool</h1>
-                <p>AI-Powered Risk Adjustment & HCC Analysis Platform</p>
+                <span class="brand-kicker">RCM-X · Risk adjustment operations</span>
+                <h1>HCC Command Center</h1>
+                <p id="header-role-context">Evidence-first coding, review, and audit workflow</p>
             </div>
             <div class="header-actions">
                 <span id="session-user" class="session-user"></span>
@@ -21,45 +22,87 @@
 
         <nav class="nav-tabs">
             <button class="nav-tab active" data-tab="dashboard">Dashboard</button>
-            <button class="nav-tab role-supervisor" data-tab="upload">Upload PDF</button>
-            <button class="nav-tab" data-tab="coder">Coder Review</button>
-            <button class="nav-tab" data-tab="calculator">Risk Calculator</button>
-            <button class="nav-tab" data-tab="audit">Audit Trail</button>
+            <button class="nav-tab role-supervisor" data-tab="upload">Intake & Upload</button>
+            <button class="nav-tab role-coder" data-tab="coder">Coding Workbench</button>
+            <button class="nav-tab role-calculator" data-tab="calculator">Risk Calculator</button>
+            <button class="nav-tab role-supervisor" data-tab="audit">Audit & Quality</button>
             <button class="nav-tab" data-tab="hcc-reference">HCC Reference</button>
         </nav>
 
         <!-- Dashboard Tab -->
         <section id="dashboard" class="tab-content active">
             <div class="section-header">
-                <h2>Dashboard</h2>
+                <div>
+                    <span class="eyebrow">Today at a glance</span>
+                    <h2 id="dashboard-title">Operations dashboard</h2>
+                    <p id="dashboard-subtitle" class="section-subtitle">Loading your workspace...</p>
+                </div>
+                <span id="dashboard-refresh-status" class="feedback muted">Updating...</span>
             </div>
-            <div class="dashboard-grid">
-                <div class="card">
-                    <h3>Quick Stats</h3>
-                    <div class="stat-item">
-                        <span class="stat-label">Total Patients Analyzed:</span>
-                        <span class="stat-value" id="total-patients">-</span>
+            <div class="dashboard-kpis">
+                <div class="kpi-card kpi-primary">
+                    <span class="kpi-label" id="kpi-one-label">Charts analyzed</span>
+                    <strong class="kpi-value" id="total-patients">-</strong>
+                    <span class="kpi-meta">Across the current workspace</span>
+                </div>
+                <div class="kpi-card">
+                    <span class="kpi-label" id="kpi-two-label">Coding submissions</span>
+                    <strong class="kpi-value" id="total-calculations">-</strong>
+                    <span class="kpi-meta">Tracked in the audit log</span>
+                </div>
+                <div class="kpi-card kpi-warning">
+                    <span class="kpi-label" id="kpi-three-label">Needs attention</span>
+                    <strong class="kpi-value" id="dashboard-attention">-</strong>
+                    <span class="kpi-meta" id="dashboard-attention-meta">Queue items requiring action</span>
+                </div>
+            </div>
+            <div id="coder-quality-card" class="card coder-quality-card" style="display:none;">
+                <div class="card-heading">
+                    <div><span class="eyebrow">Quality feedback</span><h3 id="coder-quality-title">My quality</h3></div>
+                    <span id="coder-quality-score" class="status-badge status-neutral">-</span>
+                </div>
+                <div id="coder-quality-summary" class="quality-summary"></div>
+                <div id="coder-quality-records" class="quality-records"></div>
+            </div>
+            <div class="dashboard-grid dashboard-command-grid">
+                <div class="card command-card">
+                    <div class="card-heading">
+                        <div><span class="eyebrow">Workflow pulse</span><h3 id="workflow-card-title">Your work</h3></div>
+                        <span id="workflow-stage-badge" class="status-badge status-neutral">Loading</span>
                     </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Total Calculations:</span>
-                        <span class="stat-value" id="total-calculations">-</span>
+                    <div id="workflow-summary" class="workflow-summary"></div>
+                    <div class="workflow-actions">
+                        <button id="dashboard-primary-action" class="btn-primary" type="button" onclick="openPrimaryDashboardAction()">Open next action</button>
+                        <button class="btn-secondary" type="button" onclick="updateDashboard()">Refresh</button>
                     </div>
                 </div>
-
-                <div class="card">
-                    <h3>Recent Analysis</h3>
-                    <div id="recent-analysis" class="recent-list"></div>
+                <div class="card command-card">
+                    <div class="card-heading">
+                        <div><span class="eyebrow">Queue visibility</span><h3>Chart pipeline</h3></div>
+                        <span id="queue-count" class="queue-count">-</span>
+                    </div>
+                    <div class="queue-controls">
+                        <input id="queue-search" type="search" placeholder="Search filename or chart ID" aria-label="Search chart queue">
+                        <select id="queue-status-filter" aria-label="Filter chart queue by status">
+                            <option value="all">All statuses</option>
+                            <option value="queued">Queued</option>
+                            <option value="locked">In coding</option>
+                            <option value="pending_audit">Pending audit</option>
+                            <option value="audit_locked">In audit</option>
+                            <option value="audited">Completed</option>
+                        </select>
+                    </div>
+                    <div id="queue-breakdown" class="queue-breakdown"></div>
+                    <div id="queue-table-wrap" class="queue-table-wrap"></div>
                 </div>
-
-                <div class="card">
-                    <h3>Insurance Models</h3>
-                    <ul class="model-list">
-                        <li>Medicare Advantage (MA)</li>
-                        <li>Original Medicare</li>
-                        <li>Medicaid</li>
-                        <li>Commercial</li>
-                    </ul>
+            </div>
+            <div class="card role-guidance-card">
+                <div>
+                    <span class="eyebrow">Role workspace</span>
+                    <h3 id="role-guidance-title">Built for your responsibility</h3>
+                    <p id="role-guidance-copy">Your dashboard is scoped to the work you are allowed to perform.</p>
                 </div>
+                <div id="role-guidance-list" class="role-guidance-list"></div>
             </div>
         </section>
 
@@ -72,8 +115,11 @@
                 </div>
                 <div class="coder-workspace-actions">
                     <button class="btn-secondary" type="button" onclick="claimChart()">Claim Next Available Chart</button>
+                    <button class="btn-secondary" type="button" onclick="openCoderWindow()">Open in new tab</button>
+                    <button class="btn-secondary" type="button" onclick="loadWipCount()">Refresh WIP</button>
                     <button class="btn-secondary" type="button" onclick="toggleCoderFullscreen()" id="coder-fullscreen-button">Enter Full Screen</button>
                 </div>
+                <div id="wip-list" class="wip-list" aria-live="polite"></div>
             </div>
             <div id="claimed-chart" class="coder-review-shell" style="display:none;">
                     <div class="coder-split">
@@ -91,12 +137,37 @@
                             <h3>Coder Tools</h3>
                             <p><strong>Claimed Chart:</strong> <span id="claimed-chart-id"></span></p>
                             <p><strong>Filename:</strong> <span id="claimed-filename"></span></p>
+                            <div class="encounter-panel">
+                                <div class="pane-heading">
+                                    <strong>Encounters / dates of service</strong>
+                                    <span id="wip-count" class="queue-count">WIP 0/10</span>
+                                </div>
+                                <div id="encounter-list" class="encounter-list"></div>
+                                <div class="encounter-form">
+                                    <input type="date" id="encounter-date" aria-label="Date of service">
+                                    <input type="text" id="encounter-provider" placeholder="Provider">
+                                    <input type="text" id="encounter-place" placeholder="Place of service">
+                                    <button class="btn-secondary" type="button" onclick="createEncounter()">Create encounter line</button>
+                                </div>
+                                <div id="encounter-feedback" class="feedback muted">Create an encounter line before adding codes.</div>
+                            </div>
+                            <div id="l2-audit-panel" class="audit-review-panel" style="display:none;">
+                                <div class="audit-review-heading">
+                                    <strong>L1 audit review</strong>
+                                    <span id="l1-code-count" class="queue-count"></span>
+                                </div>
+                                <p class="feedback muted">Remove wrong L1 codes or add missed codes before submitting.</p>
+                                <div id="l1-code-review" class="code-review-list"></div>
+                                <div id="audit-quality-preview" class="feedback muted"></div>
+                            </div>
                             <div class="form-group">
                                 <label>NLP Suggestions</label>
                                 <div id="nlp-suggestions" class="nlp-suggestions"></div>
                             </div>
                             <div class="form-group coder-controls">
                                 <label for="new-code-input">Add additional ICD-10 code</label>
+                                <label for="encounter-select">Encounter</label>
+                                <select id="encounter-select" aria-label="Encounter"></select>
                                 <div class="input-with-suggestions">
                                     <input type="text" id="new-code-input" placeholder="Enter ICD-10 code (e.g. E11.9)">
                                     <div id="icd-suggestions" class="suggestions-list"></div>
@@ -121,6 +192,11 @@
                 <button class="btn-secondary role-supervisor" type="button" onclick="downloadCodingExport()">Download Coding Excel</button>
             </div>
             <div class="card">
+                <div class="upload-location">
+                    <strong>PDF upload folder</strong>
+                    <code id="upload-folder-path">Loading configured upload path...</code>
+                    <span class="feedback muted">Files are stored immediately; NLP continues in the background.</span>
+                </div>
                 <div class="upload-area" id="upload-area">
                     <div class="upload-icon">📄</div>
                     <p>Drag and drop your PDF here or click to select</p>
@@ -243,7 +319,44 @@
         <!-- Audit Trail Tab -->
         <section id="audit" class="tab-content">
             <div class="section-header">
-                <h2>Audit Trail & Compliance</h2>
+                <div>
+                    <span class="eyebrow">Quality controls</span>
+                    <h2>Audit Trail & Compliance</h2>
+                </div>
+            </div>
+            <div id="audit-bucket-card" class="card role-supervisor" style="display:none;">
+                <div class="card-heading">
+                    <div><span class="eyebrow">Completed records</span><h3>Audit bucket</h3></div>
+                    <span id="audit-bucket-count" class="queue-count">-</span>
+                </div>
+                <div class="card role-supervisor">
+                    <div class="card-heading">
+                        <div><span class="eyebrow">Team performance</span><h3>Coder production & quality</h3></div>
+                        <button class="btn-secondary" type="button" onclick="loadTeamQuality()">Refresh</button>
+                    </div>
+                    <div class="team-report-controls">
+                        <select id="team-coder-select" aria-label="Select coder report">
+                            <option value="">Select coder</option>
+                        </select>
+                        <button class="btn-secondary" type="button" onclick="downloadSelectedCoderReport()">Download coder Excel</button>
+                    </div>
+                    <div id="team-quality-table" class="queue-table-wrap"></div>
+                </div>
+                <div class="card role-supervisor">
+                    <div class="card-heading">
+                        <div><span class="eyebrow">Access management</span><h3>Create team account</h3></div>
+                    </div>
+                    <div class="team-report-controls">
+                        <input id="new-user-name" placeholder="Username">
+                        <input id="new-user-email" type="email" placeholder="Email">
+                        <input id="new-user-password" type="password" placeholder="Temporary password">
+                        <select id="new-user-role" aria-label="New account role"></select>
+                        <button class="btn-primary" type="button" onclick="createManagedUser()">Create account</button>
+                    </div>
+                    <div id="user-management-feedback" class="feedback muted"></div>
+                </div>
+                <p class="section-subtitle">Restricted projection of audited charts for quality and submission review.</p>
+                <div id="audit-bucket-table" class="queue-table-wrap"></div>
             </div>
             <div class="card">
                 <div class="form-group">
@@ -271,6 +384,8 @@
             <div class="card">
                 <h3>Compliance Summary</h3>
                 <button class="btn-primary" onclick="loadComplianceSummary()">Load Summary</button>
+                <button class="btn-secondary" onclick="downloadActivityLog()">Download Activity Log</button>
+                <button class="btn-secondary" onclick="downloadActivityLogExcel()">Download Excel</button>
                 <div id="compliance-summary" style="display:none; margin-top:20px;"></div>
             </div>
         </section>

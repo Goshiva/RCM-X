@@ -5,6 +5,10 @@ let coderValidationTimer = null;
 let accessToken = sessionStorage.getItem('access_token') || '';
 let currentUser = JSON.parse(sessionStorage.getItem('current_user') || 'null');
 let claimedCodes = [];
+let auditL1Codes = [];
+let auditWrongCodes = [];
+let auditDecisions = {};
+let dashboardSnapshot = null;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
@@ -12,14 +16,42 @@ document.addEventListener('DOMContentLoaded', function() {
         window.location.replace('/login');
         return;
     }
+    refreshCurrentUser().then(() => initializeWorkspace());
+});
+
+async function refreshCurrentUser() {
+    const response = await fetch('/api/auth/me', {headers: authenticatedHeaders()});
+    if (!response.ok) {
+        logoutUser();
+        return;
+    }
+    const data = await response.json();
+    if (!data.success || !data.user) {
+        logoutUser();
+        return;
+    }
+    currentUser = data.user;
+    sessionStorage.setItem('current_user', JSON.stringify(currentUser));
+}
+
+function initializeWorkspace() {
     setupTabNavigation();
     setupFileUpload();
+    loadUploadConfig();
     setupCoderValidation();
     loadHCCReference();
     updateDashboard();
     updateSessionUI();
     restoreCoderChart();
-});
+    loadWipCount();
+    setupQueueControls();
+    if (['supervisor', 'manager', 'admin', 'master_admin'].includes(currentUser.role)) loadTeamQuality();
+    const requestedTab = new URLSearchParams(window.location.search).get('tab');
+    if (requestedTab) {
+        const tabButton = document.querySelector(`.nav-tab[data-tab="${requestedTab}"]`);
+        if (tabButton) tabButton.click();
+    }
+}
 
 function authenticatedHeaders(json = false) {
     const headers = {};
@@ -83,8 +115,16 @@ function updateSessionUI() {
     if (sessionUser) {
         sessionUser.textContent = authenticated ? `Signed in: ${currentUser.username} (${currentUser.role})` : 'Not signed in';
     }
+    const managementRoles = ['manager', 'supervisor', 'admin', 'master_admin'];
+    const coderRoles = ['coder', 'coder_l1', 'coder_l2'];
     document.querySelectorAll('.role-supervisor').forEach(element => {
-        element.style.display = authenticated && ['supervisor', 'admin', 'master_admin'].includes(currentUser.role) ? '' : 'none';
+        element.style.display = authenticated && managementRoles.includes(currentUser.role) ? '' : 'none';
+    });
+    document.querySelectorAll('.role-coder').forEach(element => {
+        element.style.display = authenticated && coderRoles.includes(currentUser.role) ? '' : 'none';
+    });
+    document.querySelectorAll('.role-calculator').forEach(element => {
+        element.style.display = authenticated && !coderRoles.includes(currentUser.role) ? '' : 'none';
     });
 }
 
@@ -112,6 +152,61 @@ async function downloadCodingExport() {
     }
 }
 
+async function loadTeamQuality() {
+        const response = await fetch('/api/dashboard/team-quality', {headers: authenticatedHeaders()});
+        const data = await response.json();
+        if (!response.ok || !data.success) return;
+        const select = document.getElementById('team-coder-select');
+        const table = document.getElementById('team-quality-table');
+        if (!select || !table) return;
+        const roleSelect = document.getElementById('new-user-role');
+        if (roleSelect) {
+            const roles = currentUser.role === 'supervisor' ? ['coder_l1', 'coder_l2']
+                : currentUser.role === 'manager' ? ['supervisor']
+                : ['manager', 'supervisor', 'coder_l1', 'coder_l2', 'admin'];
+            roleSelect.innerHTML = roles.map(role => `<option value="${role}">${role}</option>`).join('');
+        }
+        select.innerHTML = '<option value="">Select coder</option>' + data.users.map(user =>
+            `<option value="${user.user_id}">${escapeHTML(user.username)} · ${escapeHTML(user.role)}</option>`).join('');
+        table.innerHTML = data.users.length
+            ? `<table><thead><tr><th>Coder</th><th>Role</th><th>Production %</th><th>Charts</th><th>WIP</th><th>Audited</th><th>Quality</th></tr></thead><tbody>${data.users.map(user =>
+                `<tr><td>${escapeHTML(user.username)}</td><td>${escapeHTML(user.role)}</td><td>${user.production_percent}%</td><td>${user.production_charts}</td><td>${user.wip_charts}</td><td>${user.audited_charts}</td><td>${user.quality_percent === null ? 'Pending' : `${user.quality_percent}%`}</td></tr>`).join('')}</tbody></table>`
+            : '<p class="feedback muted">No coder performance records available.</p>';
+}
+
+async function createManagedUser() {
+        const feedback = document.getElementById('user-management-feedback');
+        const response = await fetch('/api/auth/users', {
+            method: 'POST',
+            headers: authenticatedHeaders(true),
+            body: JSON.stringify({
+                username: document.getElementById('new-user-name').value.trim(),
+                email: document.getElementById('new-user-email').value.trim(),
+                password: document.getElementById('new-user-password').value,
+                role: document.getElementById('new-user-role').value
+            })
+        });
+        const data = await response.json();
+        feedback.textContent = response.ok ? `Created ${data.user.username} (${data.user.role}).` : (data.error || 'Account creation failed.');
+        feedback.className = `feedback ${response.ok ? 'success' : 'error'}`;
+        if (response.ok) loadTeamQuality();
+}
+
+async function downloadSelectedCoderReport() {
+        const userId = document.getElementById('team-coder-select').value;
+        if (!userId) return;
+        const response = await fetch(`/api/dashboard/activity-log.xlsx?user_id=${encodeURIComponent(userId)}`, {
+            headers: authenticatedHeaders()
+        });
+        if (!response.ok) return;
+        const blob = await response.blob();
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `coding_activity_${userId}.xlsx`;
+        link.click();
+        URL.revokeObjectURL(link.href);
+}
+
 // Tab Navigation
 function setupTabNavigation() {
     document.querySelectorAll('.nav-tab').forEach(tab => {
@@ -137,7 +232,11 @@ function switchTab(tabName) {
     document.getElementById(tabName).classList.add('active');
     
     // Add active class to clicked nav tab
-    event.target.classList.add('active');
+    const activeTab = document.querySelector(`.nav-tab[data-tab="${tabName}"]`);
+    if (activeTab) activeTab.classList.add('active');
+    if (tabName === 'audit' && currentUser && ['manager', 'supervisor', 'admin', 'master_admin'].includes(currentUser.role)) {
+        loadAuditBucket();
+    }
 }
 
 // File Upload Setup
@@ -164,6 +263,7 @@ function setupFileUpload() {
         if (e.dataTransfer.files.length > 0) {
             processFile(e.dataTransfer.files[0]);
         }
+
     });
     
     pdfInput.addEventListener('change', (e) => {
@@ -171,6 +271,18 @@ function setupFileUpload() {
             processFile(e.target.files[0]);
         }
     });
+}
+
+async function loadUploadConfig() {
+    const pathElement = document.getElementById('upload-folder-path');
+    if (!pathElement || !currentUser) return;
+    try {
+        const response = await fetch('/api/charts/upload-config', {headers: authenticatedHeaders()});
+        const data = await response.json();
+        if (response.ok && data.success) pathElement.textContent = data.upload_folder;
+    } catch (error) {
+        pathElement.textContent = 'Configured on the server';
+    }
 }
 
 function processFile(file) {
@@ -185,6 +297,7 @@ function processFile(file) {
     // Show progress
     document.getElementById('upload-area').style.display = 'none';
     document.getElementById('upload-progress').style.display = 'block';
+    document.getElementById('progress-text').textContent = 'Uploading PDF...';
     
     const useWorkflowUpload = currentUser && ['supervisor', 'admin', 'master_admin'].includes(currentUser.role);
     fetch(useWorkflowUpload ? '/api/charts/upload' : '/api/upload-pdf', {
@@ -413,8 +526,33 @@ function loadComplianceSummary() {
         } else {
             alert('Error: ' + data.error);
         }
+
     })
     .catch(error => alert('Failed to load compliance summary: ' + error));
+}
+
+async function downloadActivityLog() {
+    await downloadActivityFile('/api/dashboard/activity-log', 'coding_activity.jsonl');
+}
+
+async function downloadActivityLogExcel() {
+    await downloadActivityFile('/api/dashboard/activity-log.xlsx', 'coding_activity.xlsx');
+}
+
+async function downloadActivityFile(endpoint, filename) {
+    try {
+        const response = await fetch(endpoint, {headers: authenticatedHeaders()});
+        if (!response.ok) throw new Error('Activity log export is unavailable.');
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(url);
+    } catch (error) {
+        alert(error.message);
+    }
 }
 
 function displayComplianceSummary(summary) {
@@ -492,15 +630,202 @@ function searchHCC() {
 
 // Dashboard Updates
 function updateDashboard() {
-    fetch('/api/compliance-summary')
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            document.getElementById('total-calculations').textContent = data.summary.total_calculations;
-            document.getElementById('total-patients').textContent = data.summary.unique_patients;
+    if (!currentUser || !accessToken) return;
+    const isCoder = ['coder', 'coder_l1', 'coder_l2'].includes(currentUser.role);
+    const dashboardEndpoint = isCoder
+        ? '/api/dashboard/coder'
+        : '/api/dashboard/supervisor';
+    Promise.all([
+        fetch('/api/compliance-summary', {headers: authenticatedHeaders()}).then(response => response.json()),
+        fetch(dashboardEndpoint, {headers: authenticatedHeaders()}).then(response => response.json())
+    ]).then(([compliance, workflow]) => {
+        if (!compliance.success || !workflow.success) throw new Error('Dashboard data unavailable');
+        dashboardSnapshot = {compliance, workflow, isCoder};
+        renderRoleDashboard(dashboardSnapshot);
+    }).catch(error => {
+        const status = document.getElementById('dashboard-refresh-status');
+        if (status) {
+            status.textContent = 'Unable to refresh';
+            status.className = 'feedback error';
         }
-    })
-    .catch(error => console.log('Failed to update dashboard:', error));
+        console.error('Failed to update dashboard:', error);
+    });
+}
+
+function renderRoleDashboard(snapshot) {
+    const {compliance, workflow, isCoder} = snapshot;
+    const role = currentUser.role;
+    const roleNames = {
+        manager: 'Manager operations dashboard',
+        supervisor: 'Supervisor operations dashboard',
+        admin: 'Administration dashboard',
+        master_admin: 'Administration dashboard',
+        coder_l1: 'L1 coder workbench',
+        coder: 'L1 coder workbench',
+        coder_l2: 'L2 audit workbench'
+    };
+    const roleCopy = {
+        manager: ['Manage throughput and quality', 'Prioritize queues, monitor production, and keep audit capacity moving.'],
+        supervisor: ['Run today’s coding operation', 'Balance intake, coding output, and audit readiness from one view.'],
+        admin: ['Keep the program healthy', 'Manage intake and monitor the full chart lifecycle across teams.'],
+        master_admin: ['Keep the program healthy', 'Manage intake and monitor the full chart lifecycle across teams.'],
+        coder_l1: ['Code with evidence', 'Claim the next chart, validate diagnoses, and submit a defensible coding record.'],
+        coder: ['Code with evidence', 'Claim the next chart, validate diagnoses, and submit a defensible coding record.'],
+        coder_l2: ['Audit with consistency', 'Review submitted records, confirm evidence, and move accurate charts to completion.']
+    };
+    const summary = compliance.summary || {};
+    const title = roleNames[role] || 'HCC operations dashboard';
+    const guidance = roleCopy[role] || ['Your role workspace', 'Your dashboard is scoped to the work you are allowed to perform.'];
+    document.getElementById('dashboard-title').textContent = title;
+    document.getElementById('dashboard-subtitle').textContent = `Signed in as ${currentUser.username} · ${guidance[0]}`;
+    document.getElementById('header-role-context').textContent = guidance[1];
+    document.getElementById('total-patients').textContent = isCoder
+        ? (workflow.assigned_chart_ids || []).length
+        : (summary.unique_patients || 0);
+    document.getElementById('total-calculations').textContent = summary.total_calculations || 0;
+    document.getElementById('kpi-one-label').textContent = isCoder ? 'My assigned charts' : 'Patients analyzed';
+    if (isCoder && workflow.quality && typeof workflow.quality.accuracy === 'number') {
+        document.getElementById('total-calculations').textContent = `${Math.round(workflow.quality.accuracy * 100)}%`;
+        document.getElementById('kpi-two-label').textContent = 'L1 audit accuracy';
+    } else if (isCoder) {
+        document.getElementById('kpi-two-label').textContent = 'L1 audit accuracy';
+        document.getElementById('total-calculations').textContent = '—';
+    } else {
+        document.getElementById('kpi-two-label').textContent = 'Coding submissions';
+    }
+    renderCoderQuality(workflow, isCoder);
+
+    const attention = isCoder
+        ? (workflow.assigned_chart_ids || []).length
+        : (workflow.buckets ? workflow.buckets.bucket_1 + workflow.buckets.bucket_2 : 0);
+    document.getElementById('dashboard-attention').textContent = attention;
+    document.getElementById('dashboard-attention-meta').textContent = isCoder
+        ? (attention ? 'Claimed work in your queue' : 'No claimed work right now')
+        : 'Charts in active coding or audit';
+
+    document.getElementById('workflow-card-title').textContent = isCoder ? 'My work queue' : 'Team workflow';
+    const stage = isCoder ? (workflow.workflow_stage === 'l2' ? 'L2 audit' : 'L1 coding') : 'Operations';
+    const badge = document.getElementById('workflow-stage-badge');
+    badge.textContent = stage;
+    badge.className = `status-badge ${workflow.workflow_stage === 'l2' ? 'status-audit' : 'status-active'}`;
+    document.getElementById('workflow-summary').innerHTML = isCoder
+        ? `<strong>${attention}</strong> chart${attention === 1 ? '' : 's'} assigned to you.<span>${attention ? 'Continue your current assignment or claim the next available chart.' : 'Claim a chart to start your shift.'}</span>`
+        : `<strong>${workflow.buckets.bucket_1 + workflow.buckets.bucket_2 + workflow.buckets.bucket_3}</strong> charts in the pipeline.<span>${workflow.buckets.bucket_1} coding · ${workflow.buckets.bucket_2} audit · ${workflow.buckets.bucket_3} completed</span>`;
+    document.getElementById('dashboard-primary-action').textContent = isCoder ? 'Open coder review' : 'Open intake & queue';
+    document.getElementById('queue-count').textContent = isCoder ? `${attention} assigned` : `${workflow.queue.length} total`;
+    renderQueue(snapshot);
+    renderRoleGuidance(role, guidance);
+    const status = document.getElementById('dashboard-refresh-status');
+    status.textContent = `Updated ${new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
+    status.className = 'feedback success';
+}
+
+function renderCoderQuality(workflow, isCoder) {
+    const card = document.getElementById('coder-quality-card');
+    if (!card) return;
+    card.style.display = isCoder ? 'block' : 'none';
+    const quality = workflow.quality || {};
+    const score = document.getElementById('coder-quality-score');
+    const summary = document.getElementById('coder-quality-summary');
+    const records = document.getElementById('coder-quality-records');
+    if (!isCoder) return;
+    if (currentUser.role === 'coder_l2') {
+        score.textContent = `${quality.audited_charts || 0} audited`;
+        summary.innerHTML = `<span><strong>${quality.l1_errors_identified || 0}</strong> L1 errors identified</span><span><strong>${quality.changes_without_l1_error || 0}</strong> L2 changes without L1 error</span><span><strong>${quality.disputes_reversed || 0}</strong> errors reversed</span>`;
+        document.getElementById('coder-quality-title').textContent = 'My audit quality';
+        records.innerHTML = '';
+        return;
+    }
+    score.textContent = quality.accuracy === null || quality.accuracy === undefined ? 'Pending' : `${Math.round(quality.accuracy * 100)}%`;
+    document.getElementById('coder-quality-title').textContent = 'My coding quality';
+    summary.innerHTML = `<span><strong>${quality.total_errors || 0}</strong> confirmed error${quality.total_errors === 1 ? '' : 's'}</span><span><strong>${quality.disputes_reversed || 0}</strong> error${quality.disputes_reversed === 1 ? '' : 's'} reversed</span><span><strong>${quality.audited_charts || 0}</strong> audited chart${quality.audited_charts === 1 ? '' : 's'}</span>`;
+    records.innerHTML = (workflow.quality_records || []).flatMap(record =>
+        [...new Set([...(record.wrong_codes || []), ...(record.missed_codes || [])])].map(code => `<div class="quality-record"><span>Chart #${record.chart_id} · ${escapeHTML(code)} marked as L1 error</span><button class="btn-link" type="button" onclick="disputeQualityError(${record.chart_id}, '${escapeHTML(code)}')">Revert error</button></div>`)
+    ).join('') || '<p class="queue-note">No disputed quality errors.</p>';
+}
+
+async function disputeQualityError(chartId, code) {
+    try {
+        const response = await fetch('/api/dashboard/quality-dispute', {
+            method: 'POST',
+            headers: authenticatedHeaders(true),
+            body: JSON.stringify({chart_id: chartId, code})
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Unable to reverse quality error');
+        setCodeFeedback(`Quality error for ${code} was reverted.`, 'success');
+        updateDashboard();
+    } catch (error) {
+        alert(error.message);
+    }
+}
+
+function setupQueueControls() {
+    ['queue-search', 'queue-status-filter'].forEach(id => {
+        const control = document.getElementById(id);
+        if (control) control.addEventListener('input', () => {
+            if (dashboardSnapshot) renderQueue(dashboardSnapshot);
+        });
+    });
+}
+
+function renderQueue({workflow, isCoder}) {
+    const breakdown = document.getElementById('queue-breakdown');
+    const tableWrap = document.getElementById('queue-table-wrap');
+    if (isCoder) {
+        breakdown.innerHTML = `<div class="queue-stat"><strong>${workflow.assigned_chart_ids.length}</strong><span>assigned to you</span></div><div class="queue-stat"><strong>${workflow.claim_bucket === 2 ? 'L2' : 'L1'}</strong><span>active bucket</span></div>`;
+        tableWrap.innerHTML = workflow.assigned_chart_ids.length
+            ? `<p class="queue-note">Chart IDs ${workflow.assigned_chart_ids.map(id => `#${id}`).join(', ')} are assigned to your workspace.</p>`
+            : '<p class="queue-note">No assigned charts. Open Coder Review to claim the next available chart.</p>';
+        return;
+    }
+    const buckets = workflow.buckets;
+    breakdown.innerHTML = [
+        ['Bucket 1', buckets.bucket_1, 'coding'],
+        ['Bucket 2', buckets.bucket_2, 'audit'],
+        ['Bucket 3', buckets.bucket_3, 'complete']
+    ].map(item => `<div class="queue-stat"><strong>${item[1]}</strong><span>${item[0]} · ${item[2]}</span></div>`).join('');
+    const query = (document.getElementById('queue-search')?.value || '').trim().toLowerCase();
+    const status = document.getElementById('queue-status-filter')?.value || 'all';
+    const filteredQueue = workflow.queue.filter(chart => {
+        const matchesQuery = !query || String(chart.chart_id).includes(query) || chart.original_filename.toLowerCase().includes(query);
+        return matchesQuery && (status === 'all' || chart.status === status);
+    });
+    const rows = filteredQueue.slice(0, 8).map(chart => `<tr><td>#${chart.chart_id}</td><td>${escapeHTML(chart.original_filename)}</td><td><span class="status-badge status-${chart.status}">${chart.status.replace('_', ' ')}</span></td></tr>`).join('');
+    tableWrap.innerHTML = rows ? `<table class="mini-queue-table"><thead><tr><th>Chart</th><th>File</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>` : '<p class="queue-note">No charts match the current filters.</p>';
+}
+
+async function loadAuditBucket() {
+    const card = document.getElementById('audit-bucket-card');
+    const table = document.getElementById('audit-bucket-table');
+    if (!card || !table) return;
+    card.style.display = 'block';
+    table.innerHTML = '<p class="queue-note">Loading audited records...</p>';
+    try {
+        const response = await fetch('/api/dashboard/audit-bucket', {headers: authenticatedHeaders()});
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Audit bucket unavailable');
+        document.getElementById('audit-bucket-count').textContent = `${data.count} records`;
+        const rows = data.records.map(record => `<tr><td>#${record.chart_id}</td><td>${escapeHTML(record.category || 'Uncategorized')}</td><td>${escapeHTML((record.codes || []).join(', ') || 'No codes')}</td><td>${record.audited_at ? new Date(record.audited_at).toLocaleDateString() : '-'}</td></tr>`).join('');
+        table.innerHTML = rows
+            ? `<table class="mini-queue-table"><thead><tr><th>Chart</th><th>Category</th><th>ICD-10</th><th>Audited</th></tr></thead><tbody>${rows}</tbody></table>`
+            : '<p class="queue-note">No audited records are available yet.</p>';
+    } catch (error) {
+        table.innerHTML = `<p class="feedback error">${escapeHTML(error.message)}</p>`;
+    }
+}
+
+function renderRoleGuidance(role, guidance) {
+    document.getElementById('role-guidance-title').textContent = guidance[0];
+    document.getElementById('role-guidance-copy').textContent = guidance[1];
+    const items = ['Keep evidence attached to every accepted diagnosis.', 'Use the HCC Reference for code context before submission.', 'Leave a clear audit trail for every exception.'];
+    if (role === 'coder_l2') items[0] = 'Verify MEAT evidence and page references before approving.';
+    if (['manager', 'supervisor', 'admin', 'master_admin'].includes(role)) items[0] = 'Watch Bucket 2 closely so completed coding does not stall in audit.';
+    document.getElementById('role-guidance-list').innerHTML = items.map(item => `<span>✓ ${item}</span>`).join('');
+}
+
+function openPrimaryDashboardAction() {
+    switchTab(['coder', 'coder_l1', 'coder_l2'].includes(currentUser.role) ? 'coder' : 'upload');
 }
 
 // Auto-update dashboard every 30 seconds
@@ -619,7 +944,7 @@ function claimChart() {
 }
 
 async function restoreCoderChart() {
-    if (!currentUser || currentUser.role !== 'coder' || !accessToken) return;
+    if (!currentUser || !['coder', 'coder_l1', 'coder_l2'].includes(currentUser.role) || !accessToken) return;
     try {
         const response = await fetch('/api/charts/current', {headers: authenticatedHeaders()});
         const data = await response.json();
@@ -627,6 +952,110 @@ async function restoreCoderChart() {
     } catch (error) {
         // The coder can still use the claim button if the restore request is unavailable.
     }
+}
+
+function renderEncounters(encounters) {
+    const list = document.getElementById('encounter-list');
+    const select = document.getElementById('encounter-select');
+    if (!list || !select) return;
+    list.innerHTML = encounters.length
+        ? encounters.map(item => `<div class="encounter-row"><strong>${escapeHTML(item.date_of_service)}</strong><span>${escapeHTML(item.provider || 'Provider not entered')}</span><span>${(item.codes || []).length} code${(item.codes || []).length === 1 ? '' : 's'}</span></div>`).join('')
+        : '<span class="feedback muted">No encounter lines yet.</span>';
+    select.innerHTML = encounters.map(item => `<option value="${escapeHTML(item.encounter_id)}">${escapeHTML(item.date_of_service)} · ${escapeHTML(item.provider || 'Encounter')}</option>`).join('');
+    select.disabled = !encounters.length;
+}
+
+async function createEncounter() {
+    const chartId = document.getElementById('claimed-chart-id').textContent;
+    const dateOfService = document.getElementById('encounter-date').value;
+    if (!dateOfService) {
+        document.getElementById('encounter-feedback').textContent = 'Enter a date of service.';
+        return;
+    }
+    const response = await fetch(`/api/charts/${chartId}/encounters`, {
+        method: 'POST',
+        headers: authenticatedHeaders(true),
+        body: JSON.stringify({
+            date_of_service: dateOfService,
+            provider: document.getElementById('encounter-provider').value,
+            place_of_service: document.getElementById('encounter-place').value
+        })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+        document.getElementById('encounter-feedback').textContent = data.error || 'Unable to create encounter line.';
+        return;
+    }
+    const current = Array.from(document.querySelectorAll('#encounter-select option')).map(option => ({
+        encounter_id: option.value,
+        date_of_service: option.textContent.split(' · ')[0],
+        provider: option.textContent.split(' · ')[1] || '',
+        codes: []
+    }));
+    current.push(data.encounter);
+    renderEncounters(current);
+    document.getElementById('encounter-date').value = '';
+    document.getElementById('encounter-provider').value = '';
+    document.getElementById('encounter-place').value = '';
+    document.getElementById('encounter-feedback').textContent = 'Encounter line created. Select it before adding a code.';
+}
+
+async function loadWipCount() {
+    try {
+        const response = await fetch('/api/charts/wip', {headers: authenticatedHeaders()});
+        const data = await response.json();
+        if (response.ok && data.success) {
+            const count = document.getElementById('wip-count');
+            if (count) count.textContent = `WIP ${data.count}/${data.limit}`;
+            const list = document.getElementById('wip-list');
+            if (list) {
+                list.innerHTML = data.charts.length
+                    ? `<strong>My WIP (${data.count}/${data.limit})</strong> ${data.charts.map(chart => `<button type="button" class="wip-chart" data-chart-id="${chart.chart_id}">#${chart.chart_id} ${escapeHTML(chart.original_filename)} · ${escapeHTML(chart.status)}</button>`).join('')}`
+                    : `<span class="feedback muted">My WIP is empty (${data.remaining} slots available).</span>`;
+                list.querySelectorAll('.wip-chart').forEach(button => button.addEventListener('click', () => loadClaimedChart(button.dataset.chartId)));
+            }
+        }
+    } catch (error) {
+        // WIP status is informative; claiming remains available if this request fails.
+    }
+}
+
+function openCoderWindow() {
+    const tab = window.open(`${window.location.origin}/?tab=coder`, '_blank', 'noopener');
+    if (!tab) setCodeFeedback('Allow pop-ups to open the coding workspace in a new tab.', 'error');
+}
+
+function renderL2AuditPanel(l1Codes, auditQuality) {
+    const panel = document.getElementById('l2-audit-panel');
+    const list = document.getElementById('l1-code-review');
+    if (!panel || !list) return;
+    const isL2 = currentUser && currentUser.role === 'coder_l2';
+    panel.style.display = isL2 ? 'block' : 'none';
+    if (!isL2) return;
+    document.getElementById('l1-code-count').textContent = `${l1Codes.length} L1 line${l1Codes.length === 1 ? '' : 's'}`;
+    const removedCodes = l1Codes.filter(code => !claimedCodes.includes(code));
+    list.innerHTML = claimedCodes.length || removedCodes.length
+        ? claimedCodes.map(code => `<span class="code-review-chip">${escapeHTML(code)}<button type="button" data-remove-code="${escapeHTML(code)}" aria-label="Remove ${escapeHTML(code)}">×</button></span>`).join('') +
+            removedCodes.map(code => `<span class="code-review-chip code-review-removed">${escapeHTML(code)}<select data-audit-code="${escapeHTML(code)}"><option value="l1_error">L1 error</option><option value="l2_change">L2 change</option></select></span>`).join('')
+        : '<span class="feedback muted">No codes submitted by L1.</span>';
+    list.querySelectorAll('button[data-remove-code]').forEach(button => button.addEventListener('click', () => {
+        if (l1Codes.includes(button.dataset.removeCode) && !auditWrongCodes.includes(button.dataset.removeCode)) {
+            auditWrongCodes.push(button.dataset.removeCode);
+        }
+        auditDecisions[button.dataset.removeCode] = 'l1_error';
+        claimedCodes = claimedCodes.filter(code => code !== button.dataset.removeCode);
+        renderL2AuditPanel(l1Codes, auditQuality);
+    }));
+    list.querySelectorAll('select[data-audit-code]').forEach(select => {
+        select.value = auditDecisions[select.dataset.auditCode] || 'l1_error';
+        select.addEventListener('change', () => {
+            auditDecisions[select.dataset.auditCode] = select.value;
+        });
+    });
+    const preview = document.getElementById('audit-quality-preview');
+    if (preview) preview.textContent = auditQuality.accuracy !== undefined
+        ? `Previous audit accuracy: ${Math.round(auditQuality.accuracy * 100)}%`
+        : 'Accuracy is calculated when this audit is submitted.';
 }
 
 function loadClaimedChart(chartId) {
@@ -641,6 +1070,12 @@ function loadClaimedChart(chartId) {
             document.getElementById('claimed-chart-id').textContent = data.chart.chart_id;
             document.getElementById('claimed-filename').textContent = data.chart.original_filename || data.chart.file_path;
             claimedCodes = data.latest_risk_input.captured_icd10_codes || [];
+            auditL1Codes = data.latest_risk_input.l1_captured_icd10_codes || [];
+            auditWrongCodes = [];
+            auditDecisions = {};
+            renderL2AuditPanel(auditL1Codes, data.latest_risk_input.audit_quality || {});
+            renderEncounters(data.latest_risk_input.encounters || []);
+            loadWipCount();
 
             loadChartPreview(chartId);
 
@@ -649,6 +1084,41 @@ function loadClaimedChart(chartId) {
 
         } else {
             alert('Failed to load chart');
+        }
+
+        function renderL2AuditPanel(l1Codes, auditQuality) {
+            const panel = document.getElementById('l2-audit-panel');
+            const list = document.getElementById('l1-code-review');
+            if (!panel || !list) return;
+            const isL2 = currentUser && currentUser.role === 'coder_l2';
+            panel.style.display = isL2 ? 'block' : 'none';
+            if (!isL2) return;
+            document.getElementById('l1-code-count').textContent = `${l1Codes.length} L1 line${l1Codes.length === 1 ? '' : 's'}`;
+            const removedCodes = l1Codes.filter(code => !claimedCodes.includes(code));
+            list.innerHTML = claimedCodes.length || removedCodes.length
+                ? claimedCodes.map(code => `<span class="code-review-chip">${escapeHTML(code)}<button type="button" data-remove-code="${escapeHTML(code)}" aria-label="Remove ${escapeHTML(code)}">×</button></span>`).join('') +
+                    removedCodes.map(code => `<span class="code-review-chip code-review-removed">${escapeHTML(code)}<select data-audit-code="${escapeHTML(code)}"><option value="l1_error">L1 error</option><option value="l2_change">L2 change</option></select></span>`).join('')
+                : '<span class="feedback muted">No codes submitted by L1.</span>';
+            list.querySelectorAll('button[data-remove-code]').forEach(button => button.addEventListener('click', () => {
+                if (l1Codes.includes(button.dataset.removeCode) && !auditWrongCodes.includes(button.dataset.removeCode)) {
+                    auditWrongCodes.push(button.dataset.removeCode);
+                }
+                auditDecisions[button.dataset.removeCode] = 'l1_error';
+                claimedCodes = claimedCodes.filter(code => code !== button.dataset.removeCode);
+                renderL2AuditPanel(l1Codes, auditQuality);
+            }));
+            list.querySelectorAll('select[data-audit-code]').forEach(select => {
+                select.value = auditDecisions[select.dataset.auditCode] || 'l1_error';
+                select.addEventListener('change', () => {
+                    auditDecisions[select.dataset.auditCode] = select.value;
+                });
+            });
+            const preview = document.getElementById('audit-quality-preview');
+            if (auditQuality.accuracy !== undefined) {
+                preview.textContent = `Previous audit accuracy: ${Math.round(auditQuality.accuracy * 100)}%`;
+            } else {
+                preview.textContent = 'Accuracy is calculated when this audit is submitted.';
+            }
         }
     })
     .catch(err => alert('Load failed: ' + err));
@@ -661,6 +1131,11 @@ function toggleCoderFullscreen() {
     if (document.fullscreenElement) {
         document.exitFullscreen();
         return;
+    }
+
+    function openCoderWindow() {
+        const tab = window.open(`${window.location.origin}/?tab=coder`, '_blank', 'noopener');
+        if (!tab) setCodeFeedback('Allow pop-ups to open the coding workspace in a new tab.', 'error');
     }
     workspace.requestFullscreen().catch(() => workspace.classList.toggle('workspace-fullscreen'));
 }
@@ -695,9 +1170,16 @@ async function loadChartPreview(chartId) {
         if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
         preview.dataset.objectUrl = URL.createObjectURL(blob);
         preview.src = preview.dataset.objectUrl;
+        preview.onload = () => {
+            const status = document.getElementById('pdf-review-status');
+            if (status) status.textContent = 'PDF document ready';
+        };
+        preview.onerror = () => {
+            setCodeFeedback('The chart PDF could not be displayed by the browser.', 'error');
+        };
     } catch (error) {
         preview.removeAttribute('src');
-        setCodeFeedback('Chart preview unavailable. Use diagnosis evidence review.', 'error');
+        setCodeFeedback('Chart PDF is unavailable. Ask intake to re-upload this chart.', 'error');
     }
 }
 
@@ -733,11 +1215,11 @@ function toggleEvidenceDrawer(button) {
 function renderNLPReview(nlpResult, savedDecisions = {}) {
     const container = document.getElementById('nlp-suggestions');
     const conditions = (nlpResult.entities || []).filter(entity => entity.type === 'condition');
-    if (!conditions.length) {
+    const detectedCodes = (nlpResult.entities || []).filter(entity => entity.type === 'icd10');
+    if (!conditions.length && !detectedCodes.length) {
         container.textContent = 'No diagnosis suggestions found. Review the chart manually.';
         return;
     }
-
     const auditSummary = nlpResult.audit_summary || {};
     let summaryHTML = '';
     if (auditSummary.audit_proof_count !== undefined || auditSummary.supported_count !== undefined) {
@@ -863,8 +1345,11 @@ function renderNLPReview(nlpResult, savedDecisions = {}) {
             </div>
         `;
     }).join('');
-
-    container.innerHTML = summaryHTML + queryOpportunitiesHTML + conditionsHTML;
+    const codeMarkup = detectedCodes.map(entity => {
+        const mapping = entity.hcc && typeof entity.hcc === 'object' ? entity.hcc : {};
+        return `<div class="nlp-suggestion nlp-detected-code"><strong>${escapeHTML(entity.code)}</strong> · ${escapeHTML(entity.description || 'Detected ICD-10 code')}<br><small>Detected in chart${mapping.hcc_code ? ` · ${escapeHTML(mapping.hcc_code)}` : ''}</small></div>`;
+    }).join('');
+    container.innerHTML = summaryHTML + queryOpportunitiesHTML + conditionsHTML + codeMarkup;
 
     container.querySelectorAll('.toggle-evidence-btn').forEach(btn => {
         btn.addEventListener('click', () => toggleEvidenceDrawer(btn));
@@ -981,8 +1466,13 @@ async function loadICDEvidence() {
 async function addCodeToChart() {
     const chartId = document.getElementById('claimed-chart-id').textContent;
     const code = document.getElementById('new-code-input').value.trim();
+    const encounterId = document.getElementById('encounter-select').value;
     if (!code) {
         setCodeFeedback('Enter an ICD-10 code to add.', 'error');
+        return;
+    }
+    if (!encounterId) {
+        setCodeFeedback('Create and select an encounter line before adding a code.', 'error');
         return;
     }
 
@@ -992,11 +1482,19 @@ async function addCodeToChart() {
         return;
     }
 
+    if (currentUser && currentUser.role === 'coder_l2') {
+        if (!claimedCodes.includes(code)) claimedCodes.push(code);
+        auditDecisions[code] = 'l2_change';
+        renderL2AuditPanel(auditL1Codes, {});
+        document.getElementById('new-code-input').value = '';
+        setCodeFeedback(`Missed code ${code} added for audit.`, 'success');
+        return;
+    }
     try {
         const response = await fetch(`/api/charts/${chartId}/add-code`, {
             method: 'POST',
             headers: authenticatedHeaders(true),
-            body: JSON.stringify({ code: code })
+            body: JSON.stringify({ code: code, encounter_id: encounterId })
         });
         const data = await response.json();
 
@@ -1031,9 +1529,13 @@ async function submitCoding() {
         const secondaryComment = suggestion.dataset.secondaryComment || '';
         if (decision) decisions[diagnosis] = {decision, secondary_comment: secondaryComment};
     });
+    const wrongL1Codes = currentUser && currentUser.role === 'coder_l2' ? auditWrongCodes : [];
+    const auditDecisionPayload = currentUser && currentUser.role === 'coder_l2'
+        ? Object.entries(auditDecisions).map(([code, classification]) => ({code, classification}))
+        : [];
     const payload = {
         chart_id: chartId,
-        user_inputs: { coder_note: 'submitted from UI', diagnosis_decisions: decisions },
+        user_inputs: { coder_note: 'submitted from UI', diagnosis_decisions: decisions, wrong_l1_codes: wrongL1Codes, audit_decisions: auditDecisionPayload },
         captured_icd10_codes: codes,
         mapped_hcc_versions: [],
         calculated_raf_score: null
@@ -1049,7 +1551,11 @@ async function submitCoding() {
         if (!response.ok || !data.success) throw new Error(data.error || 'unknown');
         document.getElementById('claimed-chart').classList.add('submitted');
         document.querySelector('#claimed-chart button[onclick="submitCoding()"]')?.setAttribute('disabled', 'disabled');
-        setCodeFeedback('Coding submitted successfully. Chart marked completed.', 'success');
+        if (data.audit_quality && data.audit_quality.accuracy !== undefined) {
+            setCodeFeedback(`Audit submitted. L1 accuracy: ${Math.round(data.audit_quality.accuracy * 100)}% (${data.audit_quality.total_errors} error${data.audit_quality.total_errors === 1 ? '' : 's'}).`, 'success');
+        } else {
+            setCodeFeedback('Coding submitted. Chart is now waiting for L2 audit.', 'success');
+        }
     } catch (error) {
         setCodeFeedback('Submit failed: ' + error.message, 'error');
     }

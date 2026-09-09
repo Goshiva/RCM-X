@@ -42,6 +42,37 @@ class AuthService:
         )
         return self.repository.create_user(user)
 
+    def create_managed_user(
+        self,
+        creator: UserRecord,
+        username: str,
+        email: str,
+        password: str,
+        role: str,
+    ) -> UserRecord:
+        allowed_roles = {
+            "supervisor": {"manager", "admin", "master_admin"},
+            "coder_l1": {"supervisor", "manager", "admin", "master_admin"},
+            "coder_l2": {"supervisor", "manager", "admin", "master_admin"},
+            "manager": {"admin", "master_admin"},
+            "admin": {"admin", "master_admin"},
+        }
+        if role not in allowed_roles or creator.role not in allowed_roles[role]:
+            raise AuthError("Your role cannot create this account type")
+        if not username or not email or len(password) < 8:
+            raise AuthError("Username, email, and an 8-character password are required")
+        if self.repository.get_user_by_username(username):
+            raise AuthError("Username already exists")
+        if any(user.email == email for user in self.repository._users.values()):
+            raise AuthError("Email already exists")
+        return self.repository.create_user(UserRecord(
+            username=username,
+            email=email,
+            role=role,
+            password_hash=self.password_hasher.hash_password(password),
+            created_by_user_id=creator.user_id,
+        ))
+
     def authenticate_user(self, username: str, password: str, ip_address: str) -> Dict[str, Any]:
         user = self.repository.get_user_by_username(username)
         if not user:
