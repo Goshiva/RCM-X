@@ -24,25 +24,7 @@
                 <button class="btn-primary login-submit" type="submit">Sign in</button>
                 <p id="login-feedback" class="feedback muted" role="status"></p>
             </form>
-            <details class="auth-register">
-                <summary>Create coder account</summary>
-                <form id="register-form">
-                    <div class="form-group">
-                        <label for="register-username">Username</label>
-                        <input id="register-username" type="text" autocomplete="username" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="register-email">Email</label>
-                        <input id="register-email" type="email" autocomplete="email" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="register-password">Password</label>
-                        <input id="register-password" type="password" autocomplete="new-password" required>
-                    </div>
-                    <button class="btn-secondary" type="submit">Create account</button>
-                    <p id="register-feedback" class="feedback muted" role="status"></p>
-                </form>
-            </details>
+            <p class="login-help">Need access? Ask your supervisor, manager, or administrator to create your account.</p>
         </section>
     </main>
     <script src="{{ url_for('static', filename='login.js') }}"></script>

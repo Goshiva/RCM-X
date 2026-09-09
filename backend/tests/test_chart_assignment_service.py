@@ -2,7 +2,7 @@ import unittest
 
 from backend.app.models.chart import ChartRecord
 from backend.app.repositories.chart_repository import InMemoryChartRepository
-from backend.app.services.chart_assignment_service import ChartAssignmentService
+from backend.app.services.chart_assignment_service import ChartAssignmentError, ChartAssignmentService
 
 
 class ChartAssignmentServiceTests(unittest.TestCase):
@@ -29,6 +29,18 @@ class ChartAssignmentServiceTests(unittest.TestCase):
 
         self.assertTrue(released)
         self.assertEqual(repo.get_chart(claimed.chart_id).status, "released")
+
+    def test_user_can_hold_at_most_ten_wip_charts(self) -> None:
+        repo = InMemoryChartRepository()
+        for index in range(11):
+            repo.create_chart(ChartRecord(file_path=f"/tmp/{index}.pdf", original_filename=f"{index}.pdf"))
+
+        service = ChartAssignmentService(repository=repo)
+        for _ in range(10):
+            self.assertIsNotNone(service.claim_next_available_chart(user_id=1, actor_role="coder"))
+
+        with self.assertRaisesRegex(ChartAssignmentError, "WIP limit reached"):
+            service.claim_next_available_chart(user_id=1, actor_role="coder")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ class UserRecord:
     email: str
     role: str
     password_hash: str
+    created_by_user_id: Optional[int] = None
     is_active: bool = True
     user_id: Optional[int] = None
     failed_login_count: int = 0

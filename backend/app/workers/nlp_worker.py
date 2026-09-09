@@ -37,9 +37,6 @@ class InMemoryNLPWorker:
         if not chart:
             return
 
-        chart.status = "in_progress"
-        self.repo.update_chart(chart)
-
         try:
             nlp_result = self.nlp.extract_pdf(chart.file_path)
             icd_codes = [
@@ -66,7 +63,6 @@ class InMemoryNLPWorker:
                 user_id=0,
             )
 
-            chart.status = "queued"
         except Exception as exc:
             chart.status = "failed"
             self.audit.record_event(

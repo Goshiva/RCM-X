@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 
+from backend.app.core.middleware import require_auth, require_roles
 from backend.app.services.auth_service import AuthError, default_auth_service
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
@@ -30,8 +31,26 @@ def login() -> tuple:
         return jsonify({"success": False, "error": str(exc)}), 401
 
 
+@bp.route("/me", methods=["GET"])
+@require_auth
+def current_user() -> tuple:
+    user = request.current_user
+    return jsonify({
+        "success": True,
+        "user": {
+            "user_id": user.user_id,
+            "username": user.username,
+            "role": user.role,
+        },
+    }), 200
+
+
 @bp.route("/register", methods=["POST"])
 def register() -> tuple:
+    return jsonify({
+        "success": False,
+        "error": "Self-registration is disabled. Ask your supervisor, manager, or administrator to create your account.",
+    }), 403
     payload = request.get_json(silent=True) or {}
     try:
         user = auth_service.register_user(
@@ -43,3 +62,47 @@ def register() -> tuple:
         return jsonify({"success": True, "user_id": user.user_id, "role": user.role}), 201
     except AuthError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@bp.route("/users", methods=["GET"])
+@require_auth
+@require_roles("supervisor", "manager", "admin", "master_admin")
+def list_users() -> tuple:
+    users = [
+        {
+            "user_id": user.user_id,
+            "username": user.username,
+            "email": user.email,
+            "role": user.role,
+            "created_by_user_id": user.created_by_user_id,
+        }
+        for user in default_auth_service.repository._users_by_id.values()
+    ]
+    return jsonify({"success": True, "users": users}), 200
+
+
+@bp.route("/users", methods=["POST"])
+@require_auth
+@require_roles("supervisor", "manager", "admin", "master_admin")
+def create_managed_user() -> tuple:
+    payload = request.get_json(silent=True) or {}
+    try:
+        user = default_auth_service.create_managed_user(
+            creator=request.current_user,
+            username=str(payload.get("username", "")).strip(),
+            email=str(payload.get("email", "")).strip(),
+            password=str(payload.get("password", "")),
+            role=str(payload.get("role", "")).strip(),
+        )
+        return jsonify({
+            "success": True,
+            "user": {
+                "user_id": user.user_id,
+                "username": user.username,
+                "email": user.email,
+                "role": user.role,
+                "created_by_user_id": user.created_by_user_id,
+            },
+        }), 201
+    except AuthError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 403

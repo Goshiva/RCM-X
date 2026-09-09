@@ -68,6 +68,38 @@ The authenticated workflow uses three chart buckets:
 
 Roles are `manager`, `supervisor`, `coder_l1` (the legacy `coder` role remains an L1 alias), and `coder_l2`. Manager and supervisor dashboards expose bucket counts and production/quality totals; coder dashboards expose only the current user's assigned work and workflow stage.
 
+### L1/L2 Activity Log
+
+Every authenticated chart-workflow action is also appended to `audit_logs/coding_activity.jsonl`.
+Each JSONL record includes the timestamp, actor user and role, chart, action type, entity, and
+structured details such as codes added, diagnosis decisions, audit corrections, and submission quality.
+Managers, supervisors, and admins can download the protected log from **Audit & Quality** or
+`GET /api/dashboard/activity-log`. Set `AUDIT_LOG_FILE` to store it at another path.
+
+Managers, supervisors, and admins can also query overall coded data at
+`GET /api/dashboard/coded-data`. Each row represents one ICD-10 code and includes the
+chart category, HCC mapping, coder, auditor, workflow status, and RAF score. The coding
+Excel export includes these normalized code/category columns.
+
+Coder work-in-progress is capacity controlled: each L1 or L2 user can hold up to
+10 active charts. The coder workbench exposes `GET /api/charts/wip` and lets users
+switch among their held charts. Before adding an ICD-10 code, the coder must create
+an encounter line with a date of service; encounter lines and their code links are
+included in the chart audit history.
+
+PDF uploads are stored in the configured `UPLOAD_FOLDER` directory (default:
+`uploads` at the repository root). Upload APIs return after storage and queue NLP
+processing in the background. Management users can view the resolved folder path
+from the Intake & Upload screen or `GET /api/charts/upload-config`.
+
+Account administration follows a role hierarchy. Managers can create supervisors;
+supervisors can create L1 and L2 coder accounts; administrators can create managers,
+supervisors, coders, and administrators. The protected `/api/auth/users` endpoints
+enforce these permissions and retain the creating user ID.
+
+Supervisor, manager, and administrator dashboards include team production and quality
+percentages, coder/role selection, and filtered individual activity-log Excel exports.
+
 ---
 
 ## 📋 Core Features

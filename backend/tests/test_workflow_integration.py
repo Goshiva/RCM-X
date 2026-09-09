@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import time
 import uuid
 
 import fitz
@@ -51,9 +52,37 @@ def test_supervisor_upload_and_coder_claim_workflow() -> None:
     assert claim.status_code == 200
     assert claim.get_json()["chart"]["chart_id"] == chart_id
 
-    chart = client.get(f"/api/charts/{chart_id}", headers=coder_headers)
-    assert chart.status_code == 200
+    chart = None
+    for _ in range(100):
+        chart = client.get(f"/api/charts/{chart_id}", headers=coder_headers)
+        assert chart.status_code == 200
+        latest_risk_input = chart.get_json()["latest_risk_input"]
+        if latest_risk_input and latest_risk_input["captured_icd10_codes"] == ["E11.9"]:
+            break
+        time.sleep(0.05)
     assert chart.get_json()["latest_risk_input"]["captured_icd10_codes"] == ["E11.9"]
+    wip = client.get("/api/charts/wip", headers=coder_headers)
+    assert wip.status_code == 200
+    assert wip.get_json()["count"] == 1
+    encounter = client.post(
+        f"/api/charts/{chart_id}/encounters",
+        headers=coder_headers,
+        json={"date_of_service": "2026-02-15", "provider": "Dr. Test"},
+    )
+    assert encounter.status_code == 201
+    encounter_id = encounter.get_json()["encounter"]["encounter_id"]
+    missing_encounter_code = client.post(
+        f"/api/charts/{chart_id}/add-code",
+        headers=coder_headers,
+        json={"code": "I10"},
+    )
+    assert missing_encounter_code.status_code == 400
+    added_code = client.post(
+        f"/api/charts/{chart_id}/add-code",
+        headers=coder_headers,
+        json={"code": "I10", "encounter_id": encounter_id},
+    )
+    assert added_code.status_code == 200
 
     submit = client.post(
         "/api/dashboard/submit",
@@ -68,6 +97,12 @@ def test_supervisor_upload_and_coder_claim_workflow() -> None:
     )
     assert submit.status_code == 200
     assert submit.get_json()["chart_status"] == "pending_audit"
+    chart_after_submit = client.get(f"/api/charts/{chart_id}", headers=coder_headers)
+    assert chart_after_submit.status_code == 200
+    assert chart_after_submit.get_json()["latest_risk_input"]["nlp_result"]["entities"]
+    preview = client.get(f"/api/charts/{chart_id}/file", headers=coder_headers)
+    assert preview.status_code == 200
+    assert preview.mimetype == "application/pdf"
 
     l2 = f"coder_l2_{suffix}"
     default_auth_service.register_user(l2, f"{l2}@example.com", password, "coder_l2")
@@ -81,7 +116,10 @@ def test_supervisor_upload_and_coder_claim_workflow() -> None:
         headers=l2_headers,
         json={
             "chart_id": chart_id,
-            "user_inputs": {"audit_note": "L2 reviewed"},
+            "user_inputs": {
+                "audit_note": "L2 reviewed",
+                "audit_decisions": [{"code": "E11.9", "classification": "l2_change"}],
+            },
             "captured_icd10_codes": ["E11.9"],
             "mapped_hcc_versions": [],
             "calculated_raf_score": None,
@@ -92,6 +130,18 @@ def test_supervisor_upload_and_coder_claim_workflow() -> None:
     )
     assert audit_submit.status_code == 200
     assert audit_submit.get_json()["chart_status"] == "audited"
+    assert audit_submit.get_json()["audit_quality"]["total_errors"] == 0
+    assert audit_submit.get_json()["audit_quality"]["l2_changes"] == ["E11.9"]
+    assert audit_submit.get_json()["audit_quality"]["accuracy"] == 1.0
+    learning = client.get("/api/dashboard/learning-signals", headers=supervisor_headers)
+    assert learning.status_code == 200
+    workbook = client.get("/api/dashboard/activity-log.xlsx", headers=supervisor_headers)
+    assert workbook.status_code == 200
+    assert workbook.mimetype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    coded_data = client.get("/api/dashboard/coded-data", headers=supervisor_headers)
+    assert coded_data.status_code == 200
+    assert coded_data.get_json()["records"][0]["icd10_code"] == "E11.9"
+    assert coded_data.get_json()["records"][0]["code_category"] == "diabetes"
 
     audit_bucket = client.get("/api/dashboard/audit-bucket", headers=supervisor_headers)
     assert audit_bucket.status_code == 200
