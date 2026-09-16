@@ -1,56 +1,24 @@
 [
   {
-    "file_path": "uploads\\59ab8aeac6eb4d51ae1379465fd87990.pdf",
+    "file_path": "uploads/52745b2863844a6a8b17f677706f83ce.pdf",
     "original_filename": "integration.pdf",
-    "status": "pending_audit",
-    "patient_details": {},
-    "encounter_details": {},
-    "category": "",
+    "status": "audited",
+    "patient_details": {
+      "patient_id": "PAT-001"
+    },
+    "encounter_details": {
+      "encounter_id": "ENC-001"
+    },
+    "category": "diabetes",
     "priority": 0,
     "chart_id": 1,
     "assigned_to_user_id": null,
-    "l1_user_id": 3,
-    "l2_user_id": null,
+    "l1_user_id": 93,
+    "l2_user_id": 94,
     "locked_at": null,
     "locked_until": null,
-    "uploaded_at": "2026-08-24T18:19:36.047871+00:00",
-    "created_at": "2026-08-24T18:19:36.047871+00:00",
-    "updated_at": "2026-08-25T16:51:24.218380+00:00"
-  },
-  {
-    "file_path": "uploads\\75cad9ecf79b4d01bd4fde6927abc08d.pdf",
-    "original_filename": "CCS_paper_feb_2026.pdf",
-    "status": "completed",
-    "patient_details": {},
-    "encounter_details": {},
-    "category": "",
-    "priority": 0,
-    "chart_id": 2,
-    "assigned_to_user_id": 3,
-    "l1_user_id": null,
-    "l2_user_id": null,
-    "locked_at": null,
-    "locked_until": null,
-    "uploaded_at": "2026-08-24T18:21:17.789446+00:00",
-    "created_at": "2026-08-24T18:21:17.789446+00:00",
-    "updated_at": "2026-08-24T18:24:52.552108+00:00"
-  },
-  {
-    "file_path": "uploads\\58668e483cfb4dc3bade381f3950d750.pdf",
-    "original_filename": "March-2026._IMCA_Updated_case_study.pdf",
-    "status": "pending_audit",
-    "patient_details": {},
-    "encounter_details": {},
-    "category": "",
-    "priority": 0,
-    "chart_id": 3,
-    "assigned_to_user_id": null,
-    "l1_user_id": 3,
-    "l2_user_id": null,
-    "locked_at": null,
-    "locked_until": null,
-    "uploaded_at": "2026-08-25T16:50:22.372578+00:00",
-    "created_at": "2026-08-25T16:50:22.372578+00:00",
-    "updated_at": "2026-08-25T16:55:21.923653+00:00"
+    "uploaded_at": "2026-09-16T17:39:20.912476+00:00",
+    "created_at": "2026-09-16T17:39:20.912476+00:00",
+    "updated_at": "2026-09-16T17:39:30.172419+00:00"
   }
 ]
